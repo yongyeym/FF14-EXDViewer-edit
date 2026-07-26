@@ -1,0 +1,914 @@
+use egui::{Frame, Layout, Modal, Sense, TextEdit, UiBuilder, Vec2, WidgetText};
+
+use crate::{
+    DEFAULT_API_URL,
+    backend::Backend,
+    data::web::{RepositoryInfo, VersionInfo, WebFileProvider},
+    schema::web::WebProvider,
+    settings::{
+        BACKEND_CONFIG, BackendConfig, GithubSchemaBranch, GithubSchemaLocation, InstallLocation,
+        Region, SchemaLocation,
+    },
+    utils::{ConvertiblePromise, PromiseKind, TrackedPromise, UnsendPromise},
+};
+
+#[cfg(target_arch = "wasm32")]
+use crate::worker::WorkerDirectory;
+
+type VersionPromise<T> = ConvertiblePromise<TrackedPromise<anyhow::Result<T>>, Option<T>>;
+type VersionPromiseHolder<K, T> = Option<(K, VersionPromise<T>)>;
+
+pub struct SetupWindow {
+    location: InstallLocation,
+    schema: SchemaLocation,
+    is_startup: bool,
+    #[cfg(target_arch = "wasm32")]
+    location_promises: SetupPromises,
+    #[cfg(target_arch = "wasm32")]
+    schema_promises: SetupPromises,
+    setup_promise: Option<UnsendPromise<anyhow::Result<(Backend, BackendConfig)>>>,
+    display_error: Option<anyhow::Error>,
+
+    web_version_promise: VersionPromiseHolder<(String, Region), VersionInfo>,
+    web_repositories_promise: VersionPromiseHolder<String, Vec<RepositoryInfo>>,
+    github_branch_promise: VersionPromiseHolder<(String, String), Vec<GithubSchemaBranch>>,
+}
+
+impl SetupWindow {
+    pub fn from_blank(is_startup: bool) -> Self {
+        #[cfg(not(target_arch = "wasm32"))]
+        let location = InstallLocation::Sqpack(
+            std::env::current_dir()
+                .ok()
+                .and_then(|p| Some(p.to_str()?.to_string()))
+                .unwrap_or("/".to_owned()),
+        );
+
+        #[cfg(target_arch = "wasm32")]
+        let location =
+            InstallLocation::Web(super::DEFAULT_API_URL.to_string(), Region::Global, None);
+
+        Self {
+            location,
+            schema: SchemaLocation::Github(GithubSchemaLocation {
+                owner: super::DEFAULT_GITHUB_REPO.0.to_string(),
+                repo: super::DEFAULT_GITHUB_REPO.1.to_string(),
+                branch: GithubSchemaBranch::Latest,
+            }),
+            is_startup,
+            #[cfg(target_arch = "wasm32")]
+            location_promises: Default::default(),
+            #[cfg(target_arch = "wasm32")]
+            schema_promises: Default::default(),
+            setup_promise: None,
+            display_error: None,
+            web_version_promise: None,
+            web_repositories_promise: None,
+            github_branch_promise: None,
+        }
+    }
+
+    pub fn from_config(ctx: &egui::Context, is_startup: bool) -> Self {
+        if let Some(Some(config)) = BACKEND_CONFIG.try_get(ctx) {
+            Self {
+                location: config.location,
+                schema: config.schema,
+                is_startup,
+                #[cfg(target_arch = "wasm32")]
+                location_promises: Default::default(),
+                #[cfg(target_arch = "wasm32")]
+                schema_promises: Default::default(),
+                setup_promise: None,
+                display_error: None,
+                web_version_promise: None,
+                web_repositories_promise: None,
+                github_branch_promise: None,
+            }
+        } else {
+            Self::from_blank(is_startup)
+        }
+    }
+
+    pub fn draw(&mut self, ctx: &egui::Context) -> Option<(Backend, BackendConfig)> {
+        #[cfg(target_arch = "wasm32")]
+        {
+            if let Some(handle) = self.location_promises.take_folder() {
+                self.location = InstallLocation::Worker(handle.0.name());
+            }
+
+            if let Some(handle) = self.schema_promises.take_folder() {
+                self.schema = SchemaLocation::Worker(handle.0.name());
+            }
+        }
+
+        let show_inner = |ui: &mut egui::Ui| {
+            ui.vertical_centered(|ui| {
+                ui.heading("设置");
+            });
+            ui.separator();
+
+            let enabled: bool;
+            match self.setup_promise.take().map(PromiseKind::try_take) {
+                None => {
+                    enabled = true;
+                }
+                Some(Err(promise)) => {
+                    self.setup_promise = Some(promise);
+                    enabled = false;
+                    ui.label("正在加载...");
+                }
+                Some(Ok(Ok(backend))) => {
+                    return Some(backend);
+                }
+                Some(Ok(Err(err))) => {
+                    log::error!("Setup Error: {err}");
+                    self.display_error = Some(err);
+                    enabled = true;
+                }
+            }
+
+            if let Some(err) = &self.display_error {
+                ui.label(err.to_string());
+            } else {
+                ui.label("请选择游戏文件和数据结构的存放位置。");
+            }
+
+            let is_go_clicked = ui
+                .add_enabled_ui(enabled, |ui| {
+                    Frame::group(ui.style()).show(ui, |ui| {
+                        ui.vertical_centered(|ui| {
+                            ui.heading("游戏文件");
+                        });
+
+                        ui.horizontal(|ui| {
+                            ui.columns_const(|[col_0, col_1]| {
+                                #[cfg(not(target_arch = "wasm32"))]
+                                if radio(
+                                    col_0,
+                                    matches!(self.location, InstallLocation::Sqpack(_)),
+                                    "本地",
+                                ) {
+                                    self.location = InstallLocation::Sqpack(
+                                        std::env::current_dir()
+                                            .ok()
+                                            .and_then(|p| Some(p.to_str()?.to_string()))
+                                            .unwrap_or("/".to_owned()),
+                                    );
+                                }
+                                #[cfg(target_arch = "wasm32")]
+                                if radio(
+                                    col_0,
+                                    matches!(self.location, InstallLocation::Worker(_)),
+                                    "本地",
+                                ) {
+                                    self.location =
+                                        InstallLocation::Worker("选择文件夹".to_string());
+                                }
+                                if radio(
+                                    col_1,
+                                    matches!(self.location, InstallLocation::Web(_, _, _)),
+                                    "网络",
+                                ) {
+                                    self.location = InstallLocation::Web(
+                                        DEFAULT_API_URL.to_string(),
+                                        Region::Global,
+                                        None,
+                                    );
+                                }
+                            });
+                        });
+
+                        match &mut self.location {
+                            #[cfg(not(target_arch = "wasm32"))]
+                            InstallLocation::Sqpack(path) => {
+                                ui.horizontal(|ui| {
+                                    ui.label("路径:");
+                                    ui.with_layout(Layout::right_to_left(egui::Align::Min), |ui| {
+                                        if ui.button("浏览").clicked()
+                                            && let Some(picked_path) = rfd::FileDialog::new()
+                                                .pick_folder()
+                                                .and_then(|d| d.to_str().map(|s| s.to_owned()))
+                                        {
+                                            *path = picked_path;
+                                        }
+                                        ui.add(
+                                            egui::TextEdit::singleline(path)
+                                                .desired_width(ui.available_width()),
+                                        );
+                                    });
+                                });
+                            }
+
+                            #[cfg(target_arch = "wasm32")]
+                            InstallLocation::Worker(name) => {
+                                use crate::data::worker::WorkerFileProvider;
+                                use web_sys::FileSystemPermissionMode;
+
+                                if !*IS_DIRECTORY_PICKER_SUPPORTED {
+                                    draw_unsupported_directory_picker(ui);
+                                } else {
+                                    ui.horizontal(|ui| {
+                                        ui.label("名称:");
+                                        ui.with_layout(
+                                            Layout::right_to_left(egui::Align::Min),
+                                            |ui| {
+                                                if ui.button("浏览").clicked() {
+                                                        self.location_promises.open_folder_picker(
+                                                            FileSystemPermissionMode::Read,
+                                                            WorkerFileProvider::add_folder,
+                                                        );
+                                                    }
+                                                    egui::ComboBox::from_id_salt("install_folder")
+                                                    .selected_text(name.as_str())
+                                                    .width(ui.available_width())
+                                                    .show_ui(ui, |ui| {
+                                                        match self
+                                                            .location_promises
+                                                            .get_folder_list(
+                                                                WorkerFileProvider::folders,
+                                                            ) {
+                                                            None => {
+                                                                ui.label("正在检索...");
+                                                            }
+                                                            Some(Err(e)) => {
+                                                                ui.label(format!(
+                                                                    format!("发生了错误: {e}")
+                                                                ));
+                                                            }
+                                                            Some(Ok(entries)) => {
+                                                                if entries.is_empty() {
+                                                                    ui.label("无");
+                                                                } else {
+                                                                    for entry in entries {
+                                                                        ui.selectable_value(
+                                                                            name,
+                                                                            entry.0.name(),
+                                                                            entry.0.name(),
+                                                                        );
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    });
+                                            },
+                                        );
+                                    });
+                                }
+                            }
+
+                            InstallLocation::Web(url, region, version) => {
+                                ui.horizontal(|ui| {
+                                    ui.label("URL:");
+                                    ui.add(
+                                        TextEdit::singleline(url)
+                                            .desired_width(ui.available_width()),
+                                    );
+                                });
+
+                                // Fetch the list of available repositories (once per URL) to
+                                // drive which regions can be selected.
+                                if !url.is_empty()
+                                    && self
+                                        .web_repositories_promise
+                                        .as_ref()
+                                        .is_none_or(|v| v.0 != *url)
+                                {
+                                    let repo_url = url.clone();
+                                    self.web_repositories_promise = Some((
+                                        url.clone(),
+                                        ConvertiblePromise::new_promise(
+                                            TrackedPromise::spawn_local(async move {
+                                                WebFileProvider::get_repositories(&repo_url).await
+                                            }),
+                                        ),
+                                    ));
+                                }
+
+                                // Resolve the set of slugs the backend actually serves. If the
+                                // repositories endpoint isn't available (older backend), fall
+                                // back to enabling every region with a known slug.
+                                let available_slugs: Option<Vec<String>> = if let Some((
+                                    _,
+                                    promise,
+                                )) =
+                                    &mut self.web_repositories_promise
+                                {
+                                    promise
+                                        .get_mut(|r| match r {
+                                            Ok(repos) => Some(repos),
+                                            Err(e) => {
+                                                log::error!("Error fetching repositories: {e}");
+                                                None
+                                            }
+                                        })
+                                        .and_then(|repos| {
+                                            repos.as_ref().map(|repos| {
+                                                repos.iter().map(|r| r.slug.clone()).collect()
+                                            })
+                                        })
+                                } else {
+                                    None
+                                };
+
+                                let is_region_available = |r: Region| {
+                                    r.is_available()
+                                        && available_slugs.as_ref().is_none_or(|slugs| {
+                                            r.slug()
+                                                .is_some_and(|slug| slugs.iter().any(|s| s == slug))
+                                        })
+                                };
+
+                                ui.horizontal(|ui| {
+                                    ui.label("区域:");
+                                    egui::ComboBox::from_id_salt("setup_region")
+                                        .selected_text(region.name())
+                                        .width(ui.available_width())
+                                        .show_ui(ui, |ui| {
+                                            for r in [
+                                                Region::Global,
+                                                Region::Korea,
+                                                Region::China,
+                                                Region::Taiwan,
+                                            ] {
+                                                if is_region_available(r) {
+                                                    ui.selectable_value(region, r, r.name());
+                                                } else {
+                                                    ui.add_enabled(
+                                                        false,
+                                                        egui::Button::selectable(
+                                                            *region == r,
+                                                            r.name(),
+                                                        ),
+                                                    );
+                                                }
+                                            }
+                                        });
+                                });
+
+                                // (Re)fetch versions whenever the URL or region changes. On an
+                                // actual change (not the initial load of a persisted config),
+                                // reset the selected version so it can't dangle across regions.
+                                let version_key = (url.clone(), *region);
+                                let key_changed = self
+                                    .web_version_promise
+                                    .as_ref()
+                                    .is_some_and(|v| v.0 != version_key);
+                                if !url.is_empty()
+                                    && region.is_available()
+                                    && self
+                                        .web_version_promise
+                                        .as_ref()
+                                        .is_none_or(|v| v.0 != version_key)
+                                {
+                                    if key_changed {
+                                        *version = None;
+                                    }
+                                    let ver_url = url.clone();
+                                    let slug = region.slug().unwrap_or_default().to_string();
+                                    self.web_version_promise = Some((
+                                        version_key,
+                                        ConvertiblePromise::new_promise(
+                                            TrackedPromise::spawn_local(async move {
+                                                WebFileProvider::get_versions(&ver_url, &slug).await
+                                            }),
+                                        ),
+                                    ));
+                                }
+
+                                ui.horizontal(|ui| {
+                                    ui.label("版本:");
+
+                                    if let Some((_, promise)) = &mut self.web_version_promise {
+                                        if let Some(versions) = promise.get_mut(|r| match r {
+                                            Ok(vers) => {
+                                                self.display_error = None;
+                                                Some(vers)
+                                            }
+                                            Err(e) => {
+                                                log::error!("Error fetching versions: {e}");
+                                                self.display_error = Some(e);
+                                                None
+                                            }
+                                        }) {
+                                            if let Some(versions) = versions {
+                                                egui::ComboBox::from_id_salt("setup_version")
+                                                    .selected_text(version.as_ref().map_or_else(
+                                                        || format!("Latest ({})", versions.latest),
+                                                        |v| v.to_string(),
+                                                    ))
+                                                    .width(ui.available_width())
+                                                    .show_ui(ui, |ui| {
+                                                        ui.selectable_value(
+                                                            version,
+                                                            None,
+                                                            format!("Latest ({})", versions.latest),
+                                                        );
+                                                        for entry in &versions.versions {
+                                                            ui.selectable_value(
+                                                                version,
+                                                                Some(entry.clone()),
+                                                                entry.to_string(),
+                                                            );
+                                                        }
+                                                    });
+                                            } else {
+                                                ui.label("加载版本失败");
+                                            }
+                                        } else {
+                                            ui.label("正在加载版本…");
+                                        }
+                                    } else {
+                                        ui.label("无可用版本");
+                                    }
+                                });
+                            }
+                        }
+                    });
+
+                    Frame::group(ui.style()).show(ui, |ui| {
+                        ui.vertical_centered(|ui| {
+                            ui.heading("数据结构定义");
+                        });
+                        ui.horizontal(|ui| {
+                            ui.columns_const(|[col_0, col_1, col_2]| {
+                                #[cfg(not(target_arch = "wasm32"))]
+                                if radio(
+                                    col_0,
+                                    matches!(self.schema, SchemaLocation::Local(_)),
+                                    "本地",
+                                ) {
+                                    self.schema = SchemaLocation::Local(
+                                        std::env::current_dir()
+                                            .ok()
+                                            .and_then(|p| Some(p.to_str()?.to_string()))
+                                            .unwrap_or("/".to_owned()),
+                                    );
+                                }
+                                #[cfg(target_arch = "wasm32")]
+                                if radio(
+                                    col_0,
+                                    matches!(self.schema, SchemaLocation::Worker(_)),
+                                    "本地",
+                                ) {
+                                    self.schema =
+                                        SchemaLocation::Worker("选择文件夹".to_string());
+                                }
+                                if radio(
+                                    col_1,
+                                    matches!(self.schema, SchemaLocation::Github(_)),
+                                    "GitHub",
+                                ) {
+                                    self.schema = SchemaLocation::Github(GithubSchemaLocation {
+                                        owner: super::DEFAULT_GITHUB_REPO.0.to_string(),
+                                        repo: super::DEFAULT_GITHUB_REPO.1.to_string(),
+                                        branch: GithubSchemaBranch::Latest,
+                                    });
+                                }
+                                if radio(
+                                    col_2,
+                                    matches!(self.schema, SchemaLocation::Web(_)),
+                                    "网络",
+                                ) {
+                                    self.schema =
+                                        SchemaLocation::Web(super::DEFAULT_SCHEMA_URL.to_string());
+                                }
+                            });
+                        });
+
+                        match &mut self.schema {
+                            #[cfg(not(target_arch = "wasm32"))]
+                            SchemaLocation::Local(path) => {
+                                ui.horizontal(|ui| {
+                                    ui.label("路径:");
+                                    ui.with_layout(Layout::right_to_left(egui::Align::Min), |ui| {
+                                        if ui.button("浏览").clicked()
+                                            && let Some(picked_path) = rfd::FileDialog::new()
+                                                .pick_folder()
+                                                .and_then(|d| d.to_str().map(|s| s.to_owned()))
+                                        {
+                                            *path = picked_path;
+                                        }
+
+                                        ui.add(
+                                            egui::TextEdit::singleline(path)
+                                                .desired_width(ui.available_width()),
+                                        );
+                                    });
+                                });
+                            }
+
+                            #[cfg(target_arch = "wasm32")]
+                            SchemaLocation::Worker(name) => {
+                                use crate::schema::worker::WorkerProvider;
+                                use web_sys::FileSystemPermissionMode;
+
+                                if !*IS_DIRECTORY_PICKER_SUPPORTED {
+                                    draw_unsupported_directory_picker(ui);
+                                } else {
+                                    ui.horizontal(|ui| {
+                                        ui.label("Name:");
+                                        ui.with_layout(
+                                            Layout::right_to_left(egui::Align::Min),
+                                            |ui| {
+                                                if ui.button("浏览").clicked() {
+                                                    self.schema_promises.open_folder_picker(
+                                                        FileSystemPermissionMode::Readwrite,
+                                                        WorkerProvider::add_folder,
+                                                    );
+                                                }
+                                                egui::ComboBox::from_id_salt("schema_folder")
+                                                    .selected_text(name.as_str())
+                                                    .width(ui.available_width())
+                                                    .show_ui(ui, |ui| {
+                                                        match self.schema_promises.get_folder_list(
+                                                            WorkerProvider::folders,
+                                                        ) {
+                                                            None => {
+                                                                ui.label("正在检索...");
+                                                            }
+                                                            Some(Err(e)) => {
+                                                                ui.label(format!(
+                                                                    format!("发生了错误: {e}")
+                                                                ));
+                                                            }
+                                                            Some(Ok(entries)) => {
+                                                                if entries.is_empty() {
+                                                                    ui.label("无");
+                                                                } else {
+                                                                    for entry in entries {
+                                                                        ui.selectable_value(
+                                                                            name,
+                                                                            entry.0.name(),
+                                                                            entry.0.name(),
+                                                                        );
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    });
+                                            },
+                                        );
+                                    });
+                                }
+                            }
+
+                            SchemaLocation::Github(GithubSchemaLocation {
+                                owner,
+                                repo,
+                                branch,
+                            }) => {
+                                ui.horizontal(|ui| {
+                                    ui.columns_const(|[col_owner, col_repo]| {
+                                        col_owner.horizontal(|ui| {
+                                            ui.label("所有者:");
+                                            ui.add(
+                                                TextEdit::singleline(owner)
+                                                    .desired_width(ui.available_width()),
+                                            );
+                                        });
+                                        col_repo.horizontal(|ui| {
+                                            ui.label("仓库:");
+                                            ui.add(
+                                                TextEdit::singleline(repo)
+                                                    .desired_width(ui.available_width()),
+                                            );
+                                        });
+                                    });
+                                });
+
+                                if !owner.is_empty()
+                                    && !repo.is_empty()
+                                    && !self
+                                        .github_branch_promise
+                                        .as_ref()
+                                        .is_some_and(|v| &v.0.0 == owner && &v.0.1 == repo)
+                                {
+                                    let owner = owner.clone();
+                                    let repo = repo.clone();
+                                    self.github_branch_promise = Some((
+                                        (owner.clone(), repo.clone()),
+                                        ConvertiblePromise::new_promise(
+                                            TrackedPromise::spawn_local(async move {
+                                                let branches =
+                                                    WebProvider::fetch_github_repository(
+                                                        &owner, &repo,
+                                                    )
+                                                    .await?;
+                                                let prs = WebProvider::fetch_github_pull_requests(
+                                                    &owner, &repo,
+                                                )
+                                                .await?;
+                                                let mut all_branches = branches;
+                                                all_branches.extend(prs);
+                                                all_branches.sort();
+                                                Ok(all_branches)
+                                            }),
+                                        ),
+                                    ));
+                                }
+
+                                ui.horizontal(|ui| {
+                                    ui.label("版本:");
+
+                                    if let Some((_, promise)) = &mut self.github_branch_promise {
+                                        if let Some(branches) = promise.get_mut(|r| match r {
+                                            Ok(vers) => {
+                                                self.display_error = None;
+                                                Some(vers)
+                                            }
+                                            Err(e) => {
+                                                log::error!("Error fetching versions: {e}");
+                                                self.display_error = Some(e);
+                                                None
+                                            }
+                                        }) {
+                                            if let Some(branches) = branches {
+                                                egui::ComboBox::from_id_salt(
+                                                    "setup_github_version",
+                                                )
+                                                .selected_text(branch.to_string())
+                                                .width(ui.available_width())
+                                                .show_ui(ui, |ui| {
+                                                    let mut branches_latest = vec![];
+                                                    let mut branches_version = vec![];
+                                                    let mut branches_other = vec![];
+                                                    let mut branches_pr = vec![];
+                                                    for entry in branches.iter() {
+                                                        let vec = match entry {
+                                                            GithubSchemaBranch::Latest => {
+                                                                &mut branches_latest
+                                                            }
+                                                            GithubSchemaBranch::Version(_) => {
+                                                                &mut branches_version
+                                                            }
+                                                            GithubSchemaBranch::Other(_) => {
+                                                                &mut branches_other
+                                                            }
+                                                            GithubSchemaBranch::PullRequest {
+                                                                ..
+                                                            } => &mut branches_pr,
+                                                        };
+                                                        vec.push(entry);
+                                                    }
+
+                                                    if !branches_latest.is_empty() {
+                                                        for entry in branches_latest {
+                                                            ui.selectable_value(
+                                                                branch,
+                                                                entry.clone(),
+                                                                entry.to_string(),
+                                                            );
+                                                        }
+                                                        ui.separator();
+                                                    }
+
+                                                    if !branches_pr.is_empty() {
+                                                        for entry in branches_pr {
+                                                            ui.selectable_value(
+                                                                branch,
+                                                                entry.clone(),
+                                                                entry.to_string(),
+                                                            );
+                                                        }
+                                                        ui.separator();
+                                                    }
+
+                                                    if !branches_other.is_empty() {
+                                                        for entry in branches_other {
+                                                            ui.selectable_value(
+                                                                branch,
+                                                                entry.clone(),
+                                                                entry.to_string(),
+                                                            );
+                                                        }
+                                                        ui.separator();
+                                                    }
+
+                                                    if !branches_version.is_empty() {
+                                                        for entry in branches_version {
+                                                            ui.selectable_value(
+                                                                branch,
+                                                                entry.clone(),
+                                                                entry.to_string(),
+                                                            );
+                                                        }
+                                                    }
+                                                });
+                                            } else {
+                                                ui.label("加载版本失败");
+                                            }
+                                        } else {
+                                            ui.label("正在加载版本…");
+                                        }
+                                    } else {
+                                        ui.label("无可用版本");
+                                    }
+                                });
+                            }
+
+                            SchemaLocation::Web(url) => {
+                                ui.horizontal(|ui| {
+                                    ui.label("URL:");
+                                    ui.add(
+                                        TextEdit::singleline(url)
+                                            .desired_width(ui.available_width()),
+                                    );
+                                });
+                            }
+                        }
+                    });
+
+                    ui.add_enabled_ui(self.can_go(), |ui| {
+                        ui.add_sized(
+                            Vec2::new(ui.available_size_before_wrap().x, 0.0),
+                            egui::Button::new("开始"),
+                        )
+                        .clicked()
+                    })
+                    .inner
+                })
+                .inner;
+
+            if is_go_clicked || self.is_startup {
+                self.is_startup = false;
+                if self.setup_promise.is_none() {
+                    let location = self.location.clone();
+                    let schema = self.schema.clone();
+                    self.setup_promise = Some(UnsendPromise::new(async move {
+                        let config = BackendConfig { location, schema };
+                        Backend::new(config.clone())
+                            .await
+                            .map(|backend| (backend, config))
+                    }));
+                }
+            }
+            None
+        };
+
+        Modal::default_area("setup-modal".into())
+            .order(egui::Order::Middle)
+            .show(ctx, |ui| {
+                ui.scope_builder(UiBuilder::new().sense(Sense::CLICK | Sense::DRAG), |ui| {
+                    egui::containers::Frame::window(ui.style())
+                        .show(ui, show_inner)
+                        .inner
+                })
+                .inner
+            })
+            .inner
+    }
+
+    fn can_go(&self) -> bool {
+        #[cfg(target_arch = "wasm32")]
+        if !*IS_DIRECTORY_PICKER_SUPPORTED
+            && (matches!(self.location, InstallLocation::Worker(_))
+                || matches!(self.schema, SchemaLocation::Worker(_)))
+        {
+            return false;
+        }
+
+        if matches!(self.location, InstallLocation::Web(_, _, _))
+            && self
+                .web_version_promise
+                .as_ref()
+                .is_none_or(|f| f.1.try_get().map_or(true, |v| v.is_none()))
+        {
+            return false;
+        }
+        if matches!(self.schema, SchemaLocation::Github(_))
+            && self
+                .github_branch_promise
+                .as_ref()
+                .is_none_or(|f| f.1.try_get().map_or(true, |v| v.is_none()))
+        {
+            return false;
+        }
+
+        true
+    }
+}
+
+fn radio(ui: &mut egui::Ui, selected: bool, text: impl Into<WidgetText>) -> bool {
+    let mut resp = ui
+        .vertical_centered_justified(|ui| ui.radio(selected, text))
+        .inner;
+    if resp.clicked() && !selected {
+        resp.mark_changed();
+        true
+    } else {
+        false
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+type SelectedPickerPromise = UnsendPromise<anyhow::Result<WorkerDirectory>>;
+
+#[cfg(target_arch = "wasm32")]
+type FolderListPromise = UnsendPromise<anyhow::Result<Vec<WorkerDirectory>>>;
+#[cfg(target_arch = "wasm32")]
+type ConvertibleFolderListPromise =
+    ConvertiblePromise<FolderListPromise, anyhow::Result<Vec<WorkerDirectory>>>;
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Default)]
+struct SetupPromises {
+    selected: Option<SelectedPickerPromise>,
+    list: Option<ConvertibleFolderListPromise>,
+}
+
+#[cfg(target_arch = "wasm32")]
+static IS_DIRECTORY_PICKER_SUPPORTED: std::sync::LazyLock<bool> =
+    std::sync::LazyLock::new(SetupPromises::is_supported);
+
+#[cfg(target_arch = "wasm32")]
+fn draw_unsupported_directory_picker(ui: &mut egui::Ui) {
+    static TITLE: &str = "Your browser does not support the File System Access API.";
+    static LINK_DESC: &str = "At the moment, only Chromium-based browsers support it.";
+    static LINK: &str = "https://developer.mozilla.org/en-US/docs/Web/API/File_System_Access_API#browser_compatibility";
+
+    ui.vertical_centered(|ui| {
+        ui.label(TITLE);
+        ui.add(
+            egui::Hyperlink::from_label_and_url(
+                egui::RichText::new(LINK_DESC).small().weak(),
+                LINK,
+            )
+            .open_in_new_tab(true),
+        );
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+impl SetupPromises {
+    fn take_folder(&mut self) -> Option<WorkerDirectory> {
+        if let Some(result) = self.selected.take_if(|p| p.ready()) {
+            let result = result.block_and_take();
+
+            self.list.take();
+            match result {
+                Ok(handle) => Some(handle),
+                Err(e) => {
+                    log::error!("Error picking folder: {e}");
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    }
+
+    fn open_folder_picker<F: Future<Output = anyhow::Result<()>>>(
+        &mut self,
+        mode: web_sys::FileSystemPermissionMode,
+        store_folder: impl Fn(WorkerDirectory) -> F + 'static,
+    ) {
+        use eframe::wasm_bindgen::JsCast;
+        use wasm_bindgen_futures::JsFuture;
+        use web_sys::{DirectoryPickerOptions, FileSystemDirectoryHandle};
+
+        let ret = UnsendPromise::new(async move {
+            let opts = DirectoryPickerOptions::new();
+            opts.set_mode(mode);
+            let promise = web_sys::window()
+                .expect("no window")
+                .show_directory_picker_with_options(&opts);
+            let promise = promise.map_err(|e| anyhow::anyhow!("{e:?}"))?;
+            let result = JsFuture::from(promise).await;
+            match result {
+                Ok(handle) => {
+                    let handle = handle
+                        .dyn_into::<FileSystemDirectoryHandle>()
+                        .map_err(|_| {
+                            anyhow::anyhow!("Error casting to FileSystemDirectoryHandle")
+                        })?;
+                    let handle = WorkerDirectory(handle);
+                    store_folder(handle.clone()).await.map(|()| handle)
+                }
+                Err(e) => Err(anyhow::anyhow!("Error picking folder: {e:?}")),
+            }
+        });
+        self.selected = Some(ret);
+    }
+
+    fn get_folder_list<F: Future<Output = anyhow::Result<Vec<WorkerDirectory>>> + 'static>(
+        &mut self,
+        future: impl FnOnce() -> F,
+    ) -> Option<&anyhow::Result<Vec<WorkerDirectory>>> {
+        if self.list.is_none() {
+            self.list = Some(ConvertiblePromise::new_promise(
+                UnsendPromise::new(future()),
+            ));
+        }
+        self.list.as_mut().unwrap().get(|r| r)
+    }
+
+    fn is_supported() -> bool {
+        use web_sys::js_sys::Reflect;
+
+        Reflect::has(
+            &web_sys::window().expect("no window"),
+            &"showDirectoryPicker".into(),
+        )
+        .expect("Reflect::has failed")
+    }
+}

@@ -1,0 +1,461 @@
+use anyhow::Result;
+use async_trait::async_trait;
+use either::Either;
+use futures_util::{StreamExt, stream::FuturesOrdered};
+use image::RgbaImage;
+use intmap::IntMap;
+use ironworks::{
+    excel::{Language, path},
+    file::{
+        exd::{ExcelData, RowHeader, SubrowHeader},
+        exh::{ColumnDefinition, PageDefinition, SheetKind},
+    },
+};
+use std::{cell::RefCell, collections::HashMap, num::NonZeroUsize, ops::Range, rc::Rc, sync::Arc};
+use url::Url;
+
+use crate::data::{FileProvider, FileProviderExt};
+use crate::utils::{CloneableResult, KeyedCache, SharedFuture};
+
+use super::provider::{ExcelHeader, ExcelPage, ExcelProvider, ExcelRow, ExcelSheet};
+
+/// Excel provider that caches parsed sheets and headers on top of a shared
+/// [`FileProvider`].
+pub struct CachedProvider(Arc<CachedProviderImpl>);
+
+impl Clone for CachedProvider {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+struct CachedProviderImpl {
+    files: Rc<dyn FileProvider>,
+    entries: HashMap<String, i32>,
+    cache: RefCell<lru::LruCache<String, SharedFuture<CloneableResult<Rc<CacheEntry>>>>>,
+}
+
+struct CacheEntry {
+    pub header: BaseHeader,
+    pub cache: RefCell<KeyedCache<Language, SharedFuture<CloneableResult<BaseSheet>>>>,
+}
+
+impl CachedProvider {
+    pub async fn new(files: Rc<dyn FileProvider>, size: NonZeroUsize) -> anyhow::Result<Self> {
+        let entries = files
+            .file::<ironworks::file::exl::ExcelList>(path::exl())
+            .await?
+            .0;
+        Ok(Self(Arc::new(CachedProviderImpl {
+            files,
+            entries,
+            cache: RefCell::new(lru::LruCache::new(size)),
+        })))
+    }
+
+    async fn use_entry<R>(
+        &self,
+        name: &str,
+        op: impl FnOnce(Rc<CacheEntry>) -> R,
+    ) -> anyhow::Result<R> {
+        let future: SharedFuture<CloneableResult<Rc<CacheEntry>>>;
+        {
+            let mut cache = self.0.cache.borrow_mut();
+
+            future = if let Some(future) = cache.get(name) {
+                future.clone()
+            } else {
+                let this = self.clone();
+                let future_name = name.to_owned();
+                let future = SharedFuture::new(async move {
+                    let header = this
+                        .0
+                        .files
+                        .file::<ironworks::file::exh::ExcelHeader>(&path::exh(&future_name))
+                        .await?;
+                    Ok(Rc::new(CacheEntry {
+                        header: BaseHeader::new(future_name, header),
+                        cache: RefCell::new(KeyedCache::new()),
+                    }))
+                });
+                cache.put(name.to_string(), future.clone());
+                future
+            };
+        }
+        future.into_shared().await.map_err(|e| e.into()).map(op)
+    }
+
+    pub async fn get_available_languages(&self, name: &str) -> anyhow::Result<Vec<Language>> {
+        let (declared, start_id) = self
+            .use_entry(name, |a| {
+                let declared = a.header.languages().clone();
+                let start_id = a
+                    .header
+                    .row_intervals()
+                    .first()
+                    .map_or(0, |page| page.start_id());
+                (declared, start_id)
+            })
+            .await?;
+
+        let paths: Vec<String> = declared
+            .iter()
+            .map(|language| path::exd(name, start_id, *language))
+            .collect();
+        let exists = self.0.files.exists_many(&paths).await?;
+
+        Ok(declared
+            .into_iter()
+            .zip(exists)
+            .filter_map(|(language, exists)| exists.then_some(language))
+            .collect())
+    }
+}
+
+#[async_trait(?Send)]
+impl ExcelProvider for CachedProvider {
+    type Header = BaseHeader;
+
+    type Sheet = BaseSheet;
+
+    fn get_entries(&self) -> &HashMap<String, i32> {
+        &self.0.entries
+    }
+
+    async fn get_icon(&self, icon_id: u32, hires: bool) -> Result<Either<Url, RgbaImage>> {
+        self.0.files.get_icon(icon_id, hires).await
+    }
+
+    async fn get_header(&self, name: &str) -> Result<BaseHeader> {
+        self.use_entry(name, |a| a.header.clone()).await
+    }
+
+    async fn get_sheet(&self, name: &str, language: Language) -> Result<BaseSheet> {
+        self.use_entry(name, |a| {
+            a.cache
+                .borrow_mut()
+                .get_or_set_ref(&language, || {
+                    let requested = language;
+                    let resolved = if a.header.languages().contains(&requested) {
+                        Some(requested)
+                    } else if a.header.languages().contains(&Language::None) {
+                        Some(Language::None)
+                    } else {
+                        None
+                    };
+                    let this = self.clone();
+                    let header = a.header.clone();
+                    let available = a.header.languages().clone();
+                    SharedFuture::new(async move {
+                        let Some(language) = resolved else {
+                            let available = available
+                                .iter()
+                                .map(ToString::to_string)
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            return Err(anyhow::anyhow!(
+                                "Sheet {} has no data for {requested} (available: {available})",
+                                header.name(),
+                            )
+                            .into());
+                        };
+                        Ok(BaseSheet::new(header, language, &*this.0.files).await?)
+                    })
+                })
+                .clone()
+        })
+        .await?
+        .into_shared()
+        .await
+        .map_err(|e| e.into())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct BaseHeader {
+    imp: Arc<BaseHeaderImpl>,
+}
+
+#[derive(Debug)]
+struct BaseHeaderImpl {
+    pub name: String,
+    pub header: ironworks::file::exh::ExcelHeader,
+    pub languages: Vec<Language>,
+}
+
+impl BaseHeader {
+    pub fn new(name: String, header: ironworks::file::exh::ExcelHeader) -> Self {
+        let languages = header
+            .languages()
+            .iter()
+            .filter_map(|l| match Language::try_from(*l) {
+                Ok(lang) => Some(lang),
+                Err(e) => {
+                    log::error!("Unknown language: {}", e.number);
+                    None
+                }
+            })
+            .collect();
+        Self {
+            imp: Arc::new(BaseHeaderImpl {
+                name,
+                header,
+                languages,
+            }),
+        }
+    }
+}
+
+impl ExcelHeader for BaseHeader {
+    fn name(&self) -> &str {
+        &self.imp.name
+    }
+
+    fn columns(&self) -> &Vec<ColumnDefinition> {
+        self.imp.header.columns()
+    }
+
+    fn row_intervals(&self) -> &Vec<PageDefinition> {
+        self.imp.header.pages()
+    }
+
+    fn languages(&self) -> &Vec<Language> {
+        &self.imp.languages
+    }
+
+    fn has_subrows(&self) -> bool {
+        self.imp.header.kind() == SheetKind::Subrows
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct BaseSheet {
+    imp: Arc<BaseSheetImpl>,
+}
+
+#[derive(Debug)]
+struct BaseSheetImpl {
+    header: BaseHeader,
+    pages: Vec<ExcelPage>,
+    subrow_count: u32,
+    // Row ID -> RowLocation (offset, page index, subrow count)
+    row_lookup: IntMap<u32, RowLocation>,
+    // First row index in range -> Range of row IDs
+    // This is used to map a row index to its corresponding row ID range.
+    row_id_lookup: Vec<(u32, Range<u32>)>,
+}
+
+async fn read_page(
+    files: &dyn FileProvider,
+    name: &str,
+    start_id: u32,
+    language: Language,
+) -> Result<ExcelData> {
+    files
+        .file::<ExcelData>(&path::exd(name, start_id, language))
+        .await
+}
+
+impl BaseSheet {
+    pub async fn new(
+        header: BaseHeader,
+        language: Language,
+        files: &dyn FileProvider,
+    ) -> Result<Self> {
+        if !header.languages().contains(&language) {
+            return Err(anyhow::anyhow!(
+                "Language {:?} not found in sheet {}",
+                language,
+                header.name()
+            ));
+        }
+
+        let has_subrows = header.has_subrows();
+        let row_size = header.imp.header.row_size();
+        let row_count = header
+            .imp
+            .header
+            .pages()
+            .iter()
+            .fold(0, |acc, p| acc + p.row_count());
+        let mut row_lookup = IntMap::with_capacity(row_count as usize);
+        let mut pages = Vec::with_capacity(header.imp.header.pages().len());
+        let mut row_id_lookup = Vec::with_capacity(header.imp.header.pages().len());
+        let mut current_row_range: Option<(u32, Range<u32>)> = None;
+
+        let header_name = header.imp.name.clone();
+        let mut page_futures: FuturesOrdered<_> = header
+            .imp
+            .header
+            .pages()
+            .iter()
+            .map(|page_def| read_page(files, &header_name, page_def.start_id(), language))
+            .collect();
+        while let Some(data) = page_futures.next().await {
+            let data = data?;
+            let page = ExcelPage {
+                row_size,
+                data_offset: data.data_offset.try_into()?,
+                data: data.data,
+            };
+            let page_idx = pages.len() as u16;
+            for row_def in data.rows {
+                let header = page.read_bw::<RowHeader>(row_def.offset)?;
+                if !has_subrows {
+                    debug_assert_eq!(header.row_count, 1);
+                }
+                let subrow_count = if has_subrows { header.row_count } else { 1 };
+                let location = RowLocation {
+                    offset: row_def.offset,
+                    page_idx,
+                    subrow_count,
+                };
+
+                match &mut current_row_range {
+                    Some(range) if range.1.end == row_def.id => range.1.end += 1,
+                    Some(range) => {
+                        row_id_lookup.push(range.clone());
+                        current_row_range =
+                            Some((row_lookup.len() as u32, row_def.id..row_def.id + 1));
+                    }
+                    None => {
+                        current_row_range =
+                            Some((row_lookup.len() as u32, row_def.id..row_def.id + 1));
+                    }
+                }
+                row_lookup.insert(row_def.id, location);
+            }
+            pages.push(page);
+        }
+
+        if let Some(range) = current_row_range {
+            row_id_lookup.push(range);
+        }
+
+        let subrow_count: u32 = row_lookup.values().map(|l| l.subrow_count as u32).sum();
+
+        Ok(Self {
+            imp: Arc::new(BaseSheetImpl {
+                header,
+                pages,
+                subrow_count,
+                row_lookup,
+                row_id_lookup,
+            }),
+        })
+    }
+}
+
+impl ExcelHeader for BaseSheet {
+    fn name(&self) -> &str {
+        self.imp.header.name()
+    }
+
+    fn columns(&self) -> &Vec<ColumnDefinition> {
+        self.imp.header.columns()
+    }
+
+    fn row_intervals(&self) -> &Vec<PageDefinition> {
+        self.imp.header.row_intervals()
+    }
+
+    fn languages(&self) -> &Vec<Language> {
+        self.imp.header.languages()
+    }
+
+    fn has_subrows(&self) -> bool {
+        self.imp.header.has_subrows()
+    }
+}
+
+impl ExcelSheet for BaseSheet {
+    fn row_count(&self) -> u32 {
+        self.imp.row_lookup.len() as u32
+    }
+
+    fn subrow_count(&self) -> u32 {
+        self.imp.subrow_count
+    }
+
+    fn get_row_ids(&self) -> impl Iterator<Item = u32> {
+        self.imp
+            .row_id_lookup
+            .iter()
+            .flat_map(|(_, range)| range.clone())
+    }
+
+    fn get_row_id_at(&self, index: u32) -> Result<u32> {
+        if index >= self.row_count() {
+            return Err(anyhow::anyhow!(
+                "Row index {} out of bounds for sheet {}",
+                index,
+                self.name()
+            ));
+        }
+        let range_idx = self
+            .imp
+            .row_id_lookup
+            .binary_search_by_key(&index, |pair| pair.0)
+            .unwrap_or_else(|i| i - 1);
+        let (start_idx, id_range) = self.imp.row_id_lookup.get(range_idx).ok_or_else(|| {
+            anyhow::anyhow!(
+                "Range index {} out of bounds for sheet {}",
+                range_idx,
+                self.name()
+            )
+        })?;
+        if !(*start_idx..start_idx + (id_range.end - id_range.start)).contains(&index) {
+            return Err(anyhow::anyhow!(
+                "Row index {} out of bounds for range {}..{} in sheet {}",
+                index,
+                id_range.start,
+                id_range.end,
+                self.name()
+            ));
+        }
+        Ok(id_range.start + (index - *start_idx))
+    }
+
+    fn get_row_subrow_count(&self, row_id: u32) -> Result<u16> {
+        Ok(self
+            .imp
+            .row_lookup
+            .get(row_id)
+            .ok_or_else(|| anyhow::anyhow!("Row ID {} not found in sheet {}", row_id, self.name()))?
+            .subrow_count)
+    }
+
+    fn get_subrow(&self, row_id: u32, subrow_id: u16) -> Result<ExcelRow<'_>> {
+        let location = self.imp.row_lookup.get(row_id).ok_or_else(|| {
+            anyhow::anyhow!("Row ID {} not found in sheet {}", row_id, self.name())
+        })?;
+        if location.subrow_count <= subrow_id {
+            return Err(anyhow::anyhow!(
+                "Subrow ID {} out of bounds for row {} in sheet {}",
+                subrow_id,
+                row_id,
+                self.name()
+            ));
+        }
+        let page = &self.imp.pages[location.page_idx as usize];
+        let struct_offset = location.offset + RowHeader::SIZE as u32;
+        let (offset, row_size) = if self.has_subrows() {
+            (
+                struct_offset
+                    + subrow_id as u32 * (SubrowHeader::SIZE as u32 + page.row_size as u32)
+                    + SubrowHeader::SIZE as u32,
+                location.subrow_count as u32 * (SubrowHeader::SIZE as u32 + page.row_size as u32),
+            )
+        } else {
+            (struct_offset, page.row_size as u32)
+        };
+        Ok(ExcelRow::new(page, offset, struct_offset + row_size))
+    }
+}
+
+#[derive(Debug)]
+struct RowLocation {
+    pub offset: u32,
+    pub page_idx: u16,
+    pub subrow_count: u16,
+}

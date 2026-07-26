@@ -1,0 +1,158 @@
+name: Build and Release
+on: push
+
+jobs:
+  build:
+    name: Build ${{matrix.platform.os-name}} (${{matrix.type.name}})
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+
+    strategy:
+      matrix:
+        type:
+          - id: dotnet
+            name: .NET
+            artifact-name: FFXIVDownloader.Command
+          - id: rust
+            name: Rust
+            artifact-name: xiv-dl
+
+        platform:
+          - os-name: linux-x64
+            runs-on: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            rid: linux-x64
+
+          - os-name: linux-arm64
+            runs-on: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            rid: linux-arm64
+
+          - os-name: win-x64
+            runs-on: windows-latest
+            rid: win-x64
+            target: x86_64-pc-windows-msvc
+            binary-ext: .exe
+
+          - os-name: win-arm64
+            runs-on: windows-11-arm
+            rid: win-arm64
+            target: aarch64-pc-windows-msvc
+            binary-ext: .exe
+
+          - os-name: osx-x64
+            runs-on: macOS-latest
+            rid: osx-x64
+            target: x86_64-apple-darwin
+
+          - os-name: osx-arm64
+            runs-on: macOS-latest
+            rid: osx-arm64
+            target: aarch64-apple-darwin
+
+    runs-on: ${{ matrix.platform.runs-on }}
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup .NET
+        if: matrix.type.id == 'dotnet'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0"
+    
+      - name: Build (.NET)
+        if: matrix.type.id == 'dotnet'
+        run: dotnet publish -c Release -r ${{matrix.platform.rid}} -o build -p:ContinuousIntegrationBuild=true dotnet/FFXIVDownloader.Command
+
+      - name: Build (Rust)
+        if: matrix.type.id == 'rust'
+        uses: houseabsolute/actions-rust-cross@v1
+        with:
+          target: ${{ matrix.platform.target }}
+          working-directory: rust
+          args: "--locked --release --bin xiv-dl"
+          strip: true
+
+      - name: Rename Binary (.NET)
+        if: matrix.type.id == 'dotnet'
+        shell: bash
+        run: |
+          mv -f build/FFXIVDownloader.Command${{ matrix.platform.binary-ext }} ${{ matrix.type.artifact-name }}-${{ matrix.platform.os-name }}${{ matrix.platform.binary-ext }}
+      
+      - name: Rename Binary (Rust)
+        if: matrix.type.id == 'rust'
+        shell: bash
+        run: |
+          mv -f rust/target/${{ matrix.platform.target }}/release/xiv-dl${{ matrix.platform.binary-ext }} ${{ matrix.type.artifact-name }}-${{ matrix.platform.os-name }}${{ matrix.platform.binary-ext }}
+      
+      - name: Attest
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            ${{ matrix.type.artifact-name }}-${{ matrix.platform.os-name }}${{ matrix.platform.binary-ext }}
+      
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.type.artifact-name }}-${{ matrix.platform.os-name }}
+          path: |
+            ${{ matrix.type.artifact-name }}-${{ matrix.platform.os-name }}${{ matrix.platform.binary-ext }}
+          if-no-files-found: error
+
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-tags: true
+          submodules: recursive
+
+      - name: Check Version
+        id: version
+        uses: issue-ops/semver@v2
+        with:
+          manifest-path: action.yml
+          workspace: ${{ github.workspace }}
+
+      - name: Check if release exists
+        id: check_release
+        run: |
+          if gh release view "v${{ steps.version.outputs.version }}" > /dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Release v${{ steps.version.outputs.version }} already exists"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Release v${{ steps.version.outputs.version }} does not exist"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Download All Builds
+        if: steps.check_release.outputs.exists == 'false'
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Release
+        if: steps.check_release.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          fail_on_unmatched_files: true
+          draft: false
+          files: |
+            artifacts/*/*

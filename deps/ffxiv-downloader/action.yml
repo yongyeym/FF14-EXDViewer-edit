@@ -1,0 +1,53 @@
+name: "FFXIV Downloader"
+author: WorkingRobot
+description: "Download and keep track of any files from FFXIV"
+inputs:
+  slug:
+    description: "Slug of the repository to download from. Thaliak holds a list of all repositories and their slugs. Defaults to 4e9a232b, which is the Win32 Global/JP base game."
+    default: "4e9a232b"
+  version:
+    description: "Version to download"
+    default: ""
+  output-path:
+    description: "Path to download files to. Defaults to ."
+    default: "."
+  regex:
+    description: "Regex to match files to download. Defaults to .*, which matches all files. Retroactively changing this should invalidate any cached files."
+    default: ".*"
+  parallelism:
+    description: "Number of concurrent threads to use for updating."
+    default: "4"
+  clut-path:
+    description: "Path to a directory or base url where CLUT files can be retrieved from."
+    default: "https://raw.githubusercontent.com/WorkingRobot/ffxiv-lut/refs/heads/main/cluts"
+  use-cache:
+    description: "Whether to use a .cachemeta.json file. Defaults to true. If false, downloads will always start from scratch."
+    default: "true"
+outputs:
+  updated:
+    description: "Whether or not an update was issued."
+  version:
+    description: "Version of the repository after the update."
+runs:
+  using: "docker"
+  image: "docker://ghcr.io/workingrobot/ffxiv-downloader:v8.1.5"
+  args:
+    - "--gha"
+    - "download"
+    - "-s"
+    - "${{inputs.slug}}"
+    - "-v"
+    - "${{inputs.version}}"
+    - "-f"
+    - "${{inputs.regex}}"
+    - "-p"
+    - "${{inputs.parallelism}}"
+    - "-o"
+    - "${{inputs.output-path}}"
+    - "-c"
+    - "${{inputs.clut-path}}"
+    - "-u"
+    - "${{inputs.use-cache}}"
+branding:
+  color: red
+  icon: download-cloud

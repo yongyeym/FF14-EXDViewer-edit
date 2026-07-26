@@ -1,0 +1,29 @@
+[package]
+name = "xiv-dl-core"
+description = "FFXIV Downloader via CLUT files"
+authors = ["Asriel Camora <asriel@camora.dev>"]
+license = "GPL-3.0"
+repository = "https://github.com/WorkingRobot/ffxiv-downloader"
+edition = "2024"
+
+[lib]
+name = "xiv_core"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.13", features = ["stream", "json"] }
+reqwest-middleware = "0.5"
+reqwest-leaky-bucket = "0.5"
+reqwest-retry = "0.9"
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+log = "0.4"
+bytes = "1"
+futures = "0.3"
+binrw = "0.15"
+tokio-util = "0.7"
+flate2 = "1"
+brotli = "8"
+multer = { version = "3", features = ["log", "tokio-io"] }
+http-content-range = "0.2"
+graphql_client = "0.16"

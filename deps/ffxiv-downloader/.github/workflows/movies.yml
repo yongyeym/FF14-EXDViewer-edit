@@ -1,0 +1,17 @@
+name: Movies
+on:
+  workflow_run:
+    workflows: ["Build Container"]
+    types: [completed]
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run downloader
+        uses: ./
+        with:
+          output-path: ./data
+          regex: '^movie\/.+$'

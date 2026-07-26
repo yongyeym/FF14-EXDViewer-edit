@@ -1,0 +1,45 @@
+[package]
+name = "xiv-dl-cli"
+description = "FFXIV Downloader via CLUT files"
+authors = ["Asriel Camora <asriel@camora.dev>"]
+license = "GPL-3.0"
+repository = "https://github.com/WorkingRobot/ffxiv-downloader"
+edition = "2024"
+
+[[bin]]
+name = "xiv-dl"
+path = "src/main.rs"
+
+[dependencies]
+xiv-dl-core = { path = "../core" }
+shadow-rs = { version = "2", default-features = false }
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.13", features = ["stream", "json"] }
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+log = "0.4"
+bytes = "1"
+futures = "0.3"
+url = "2"
+either = "1"
+clap = { version = "4", features = ["derive"] }
+serde_json = "1"
+async-trait = "0.1"
+env_logger = "0.11"
+regex = "1"
+num_cpus = "1"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_Threading",
+    "Win32_Security",
+] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[build-dependencies]
+shadow-rs = "2"

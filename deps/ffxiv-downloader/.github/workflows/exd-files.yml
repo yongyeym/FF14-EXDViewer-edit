@@ -1,0 +1,27 @@
+name: EXD Files
+on:
+  workflow_run:
+    workflows: ["Build Container"]
+    types: [completed]
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Retrieve cache
+        id: retrieve-cache
+        uses: actions/cache@v4
+        with:
+          path: data
+          key: exd-files-data-${{hashFiles('data/.cachemeta.json')}}
+          restore-keys: |
+            exd-files-data-
+
+      - name: Run downloader
+        uses: ./
+        with:
+          output-path: data
+          regex: '^sqpack\/ffxiv\/0a0000\..+$'

@@ -1,0 +1,14 @@
+.vs/
+obj/
+bin/
+build/
+*.user
+
+*.patch
+*.clut
+*.lut
+cluts/
+luts/
+test_fix.sh
+
+target/

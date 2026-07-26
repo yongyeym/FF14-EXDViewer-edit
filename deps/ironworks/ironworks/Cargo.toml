@@ -1,0 +1,58 @@
+[package]
+name = "ironworks"
+version = "0.4.1"
+authors = ["ackwell <saxon@ackwell.com.au>"]
+edition = "2024"
+description = "Modular FFXIV data toolkit written in rust."
+readme = "../README.md"
+repository = "https://github.com/ackwell/ironworks"
+license = "MIT"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+# Modules
+excel = [
+  "dep:enum-as-inner",
+  "dep:num_enum",
+  "dep:strum",
+  "sestring",
+  "exd",
+  "exh",
+  "exl",
+]
+sestring = ["dep:num_enum", "dep:time", "dep:memchr"]
+sqpack = ["dep:flate2"]
+zipatch = ["patch", "sqpack"]
+
+# File types
+eqdp = ["dep:modular-bitfield"]
+exd = []
+exh = ["dep:num_enum"]
+exl = []
+mdl = ["dep:half", "dep:modular-bitfield", "dep:num_enum"]
+mtrl = []
+patch = []
+pbd = []
+scd = []
+sklb = []
+tex = ["dep:num_enum"]
+
+[dependencies]
+binrw = "0.15.0"
+derivative = "2.2.0"
+either = "1.8.0"
+getset = "0.1.2"
+thiserror = "2.0.3"
+serde = { version = "1.0", features = ["derive"] }
+
+enum-as-inner = { version = "0.6.0", optional = true }
+flate2 = { version = "1.0.22", optional = true }
+half = { version = "2.1.0", optional = true }
+modular-bitfield = { version = "0.11.2", optional = true }
+num_enum = { version = "0.7.2", optional = true }
+strum = { version = "0.26.2", features = ["derive"], optional = true }
+time = { version = "0.3.20", optional = true }
+memchr = { version = "2.7", optional = true }

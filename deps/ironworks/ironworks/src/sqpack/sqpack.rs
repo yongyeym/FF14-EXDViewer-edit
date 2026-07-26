@@ -1,0 +1,186 @@
+use std::{fmt::Debug, sync::Arc};
+
+use crate::{
+	Resource,
+	error::{Error, ErrorValue, Result},
+	ironworks::FileStream,
+	sqpack,
+	utility::{HashMapCache, HashMapCacheExt},
+};
+
+use super::{
+	file::File,
+	index::{Index, IndexEntry},
+};
+
+const CATEGORIES: &[Option<&str>] = &[
+	/* 0x00 */ Some("common"),
+	/* 0x01 */ Some("bgcommon"),
+	/* 0x02 */ Some("bg"),
+	/* 0x03 */ Some("cut"),
+	/* 0x04 */ Some("chara"),
+	/* 0x05 */ Some("shader"),
+	/* 0x06 */ Some("ui"),
+	/* 0x07 */ Some("sound"),
+	/* 0x08 */ Some("vfx"),
+	/* 0x09 */ Some("ui_script"),
+	/* 0x0a */ Some("exd"),
+	/* 0x0b */ Some("game_script"),
+	/* 0x0c */ Some("music"),
+	/* 0x0d */ None,
+	/* 0x0e */ None,
+	/* 0x0f */ None,
+	/* 0x10 */ None,
+	/* 0x11 */ None,
+	/* 0x12 */ Some("_sqpack_test"),
+	/* 0x13 */ Some("_debug"),
+];
+
+// While this is pretty trivially computed, even just going to ex9 gives us a lead time of a good 10 years or so.
+const REPOSITORIES: &[&str] = &[
+	"ffxiv", "ex1", "ex2", "ex3", "ex4", "ex5", "ex6", "ex7", "ex8", "ex9",
+];
+
+/// Representation of a group of SqPack package files forming a single data set.
+#[derive(Debug)]
+pub struct SqPack<R> {
+	resource: Arc<R>,
+
+	indexes: HashMapCache<(u8, u8), Index<R>>,
+}
+
+impl<R: sqpack::Resource> SqPack<R> {
+	/// Build a representation of SqPack packages. The provided resource will be
+	/// queried for lookups as required to fulfil SqPack requests.
+	pub fn new(resource: R) -> Self {
+		Self {
+			resource: resource.into(),
+
+			indexes: Default::default(),
+		}
+	}
+
+	/// Get the version string for the file at `path`.
+	pub fn version(&self, path: &str) -> Result<String> {
+		let (repository, _) = self.path_metadata(&path.to_lowercase())?;
+		self.resource.version(repository)
+	}
+
+	/// Read the file at `path` from SqPack.
+	pub fn file(&self, path: &str) -> Result<File<R::File>> {
+		// SqPack paths are always lower case.
+		let path = path.to_lowercase();
+
+		// Look up the location of the requested path.
+		let (repository, category) = self.path_metadata(&path)?;
+
+		let location = self
+			.indexes
+			.try_get_or_insert((repository, category), || {
+				Index::new(repository, category, self.resource.clone())
+			})?
+			.find(&path)?;
+
+		// Build a File representation.
+		let dat = self.resource.file(repository, category, location)?;
+
+		// TODO: Cache files? Tempted to say it's the IW struct's responsibility. Is it even possible here with streams?
+		File::new(dat)
+	}
+
+	/// Check whether the file at `path` exists, using an index lookup only (the
+	/// file's data is never read).
+	pub fn exists(&self, path: &str) -> Result<bool> {
+		let path = path.to_lowercase();
+
+		let (repository, category) = match self.path_metadata(&path) {
+			Ok(metadata) => metadata,
+			Err(Error::NotFound(_)) => return Ok(false),
+			Err(error) => return Err(error),
+		};
+
+		match self
+			.indexes
+			.try_get_or_insert((repository, category), || {
+				Index::new(repository, category, self.resource.clone())
+			})?
+			.find(&path)
+		{
+			Ok(_) => Ok(true),
+			Err(Error::NotFound(_)) => Ok(false),
+			Err(error) => Err(error),
+		}
+	}
+
+	/// Every file the install records, across every repository and category.
+	pub fn entries(&self) -> Result<Vec<IndexEntry>> {
+		let mut entries = Vec::new();
+		for repository in 0..u8::try_from(REPOSITORIES.len()).unwrap() {
+			for (category, name) in CATEGORIES.iter().enumerate() {
+				if name.is_none() {
+					continue;
+				}
+				let category = u8::try_from(category).unwrap();
+				let index = self.indexes.try_get_or_insert((repository, category), || {
+					Index::new(repository, category, self.resource.clone())
+				})?;
+				match index.entries() {
+					Ok(found) => entries.extend(found),
+					// A repository or category the install does not carry.
+					Err(Error::NotFound(_)) => continue,
+					Err(error) => return Err(error),
+				}
+			}
+		}
+		Ok(entries)
+	}
+
+	/// Which repository and category a path resolves to, without touching any index.
+	pub fn locate(&self, path: &str) -> Result<(u8, u8)> {
+		self.path_metadata(&path.to_lowercase())
+	}
+
+	fn path_metadata(&self, path: &str) -> Result<(u8, u8)> {
+		// NOTE: This could be technically-faster by doing that cursed logic the
+		// game does, checking the first 3 characters for category and such - but I
+		// think this is cleaner; especially to read.
+
+		let path_not_found = || Error::NotFound(ErrorValue::Path(path.to_string()));
+
+		let mut split = path.split('/');
+		let (Some(category_segment), Some(repository_segment)) = (split.next(), split.next())
+		else {
+			return Err(path_not_found());
+		};
+
+		let repository = REPOSITORIES
+			.iter()
+			.position(|&repository| repository == repository_segment)
+			.unwrap_or(0);
+
+		let category = CATEGORIES
+			.iter()
+			.position(|&category| category == Some(category_segment))
+			.ok_or_else(path_not_found)?;
+
+		Ok((repository.try_into().unwrap(), category.try_into().unwrap()))
+	}
+}
+
+// TODO: work out the resource story for this because it's gonna get cluttery if im not careful
+impl<R> Resource for SqPack<R>
+where
+	R: sqpack::Resource + 'static,
+{
+	fn version(&self, path: &str) -> Result<String> {
+		self.version(path)
+	}
+
+	fn file(&self, path: &str) -> Result<Box<dyn FileStream>> {
+		Ok(Box::new(self.file(path)?))
+	}
+
+	fn exists(&self, path: &str) -> Result<bool> {
+		self.exists(path)
+	}
+}

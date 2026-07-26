@@ -1,0 +1,18 @@
+
+# [build]
+# rustflags = [
+#     # "--cfg",
+#     # "tokio_unstable"
+# ]
+
+[target.wasm32-unknown-unknown]
+rustflags = [
+    '--cfg',
+    'web_sys_unstable_apis',
+    '--cfg',
+    'getrandom_backend="wasm_js"',
+    # cridecoder's HCA decoder builds ~167 KiB on the stack; the 1 MiB wasm default
+    # overflows and traps as "memory access out of bounds".
+    '-C',
+    'link-arg=-zstack-size=8388608',
+]

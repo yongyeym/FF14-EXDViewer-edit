@@ -1,0 +1,77 @@
+use serde::Deserialize;
+use std::path::PathBuf;
+use xiv_cache::builder::ServerBuilder;
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct AssetCache {
+    pub version_capacity: u64,
+    pub version_ttl_minutes: u64,
+    pub file_capacity: u64,
+    pub file_ttl_minutes: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct PathList {
+    pub url: String,
+    pub ttl_minutes: u64,
+    pub cache_directory: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct Config {
+    pub server_addr: String,
+    pub metrics_server_addr: Option<String>,
+    pub log_filter: Option<String>,
+    pub log_access_format: Option<String>,
+    pub cache: ServerBuilder,
+    pub assets: AssetCache,
+    pub file_readahead: usize,
+    pub api_workers: usize,
+    pub github_client_id: String,
+    pub github_client_secret: String,
+    pub path_list: PathList,
+}
+
+impl Default for AssetCache {
+    fn default() -> Self {
+        Self {
+            version_capacity: 4,
+            version_ttl_minutes: 60,
+            file_capacity: 50,
+            file_ttl_minutes: 5,
+        }
+    }
+}
+
+impl Default for PathList {
+    fn default() -> Self {
+        Self {
+            url: "https://rl2.perchbird.dev/download/export/PathList.gz".to_string(),
+            ttl_minutes: 12 * 60,
+            cache_directory: Some(PathBuf::from("cache/paths")),
+        }
+    }
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            server_addr: "0.0.0.0:80".to_string(),
+            metrics_server_addr: None,
+            log_filter: Some(
+                "debug,exdviewer_web=debug,tracing::span=warn,foyer_memory::raw=warn".to_string(),
+            ),
+            log_access_format: None,
+            cache: ServerBuilder::default(),
+            assets: AssetCache::default(),
+            file_readahead: 0x800000, // 8 MiB
+            api_workers: 1,
+            github_client_id: String::new(),
+            github_client_secret: String::new(),
+            path_list: PathList::default(),
+        }
+    }
+}

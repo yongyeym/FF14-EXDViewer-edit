@@ -1,0 +1,3 @@
+[workspace]
+members = ["cache", "cli", "core"]
+resolver = "3"
