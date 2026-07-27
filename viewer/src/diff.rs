@@ -135,16 +135,28 @@ fn compute_diff(
                 let common = oc.len().min(nc.len());
                 let cells_match = oc[..common] == nc[..common];
                 if !cells_match {
-                    if diff_count < 3 {
-                        let mut diffs = Vec::new();
-                        for i in 0..common {
-                            if oc[i] != nc[i] { diffs.push(i); }
+                    // Smart comparison: check if differing cells are numerically equal
+                    let mut real_diffs = Vec::new();
+                    for i in 0..common {
+                        if oc[i] != nc[i] {
+                            // Try numeric comparison (handles scientific notation vs decimal)
+                            let numeric_eq = match (oc[i].parse::<f64>(), nc[i].parse::<f64>()) {
+                                (Ok(a), Ok(b)) => (a - b).abs() < 0.5,
+                                _ => false,
+                            };
+                            if !numeric_eq {
+                                real_diffs.push(i);
+                            }
                         }
-                        log::debug!("Row {:?} differs at cols {:?}: old[0..3]={:?} new[0..3]={:?}", key, diffs, &oc[..3], &nc[..3]);
                     }
-                    diff_count += 1;
-                    result.push(DiffRow { row_key: key.clone(), diff_type: DiffType::Deleted, cells: oc.clone() });
-                    result.push(DiffRow { row_key: key.clone(), diff_type: DiffType::Added, cells: nc.clone() });
+                    if !real_diffs.is_empty() {
+                        if diff_count < 3 {
+                            log::debug!("Row {:?} REAL diffs at cols {:?}: old[col48]={:?} new[col48]={:?}", key, real_diffs, oc.get(48), nc.get(48));
+                        }
+                        diff_count += 1;
+                        result.push(DiffRow { row_key: key.clone(), diff_type: DiffType::Deleted, cells: oc.clone() });
+                        result.push(DiffRow { row_key: key.clone(), diff_type: DiffType::Added, cells: nc.clone() });
+                    }
                 }
             }
             _ => {}
