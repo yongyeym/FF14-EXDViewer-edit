@@ -578,11 +578,12 @@ fn draw_icon(ctx: &GlobalContext, ui: &mut egui::Ui, icon_id: u32, sheet_name: &
             ui.close();
         }
         if ui.button("复制图片").clicked() {
-            if let Some(png) = (*icon_mgr).get_png_bytes(icon_id, hires) {
+            let png_bytes = (*icon_mgr).get_png_bytes(icon_id, hires);
+            log::debug!("复制图片: icon_id={}, hires={}, png_bytes={}", icon_id, hires, png_bytes.is_some());
+            if let Some(png) = png_bytes {
                 use arboard::Clipboard;
                 if let Ok(mut cb) = Clipboard::new() {
-                    let img = image::load_from_memory(&png).ok();
-                    if let Some(img) = img {
+                    if let Ok(img) = image::load_from_memory(&png) {
                         let rgba = img.to_rgba8();
                         let (w, h) = rgba.dimensions();
                         let _ = cb.set_image(arboard::ImageData {
@@ -590,6 +591,7 @@ fn draw_icon(ctx: &GlobalContext, ui: &mut egui::Ui, icon_id: u32, sheet_name: &
                             height: h as usize,
                             bytes: std::borrow::Cow::from(rgba.into_raw()),
                         });
+                        log::info!("图片已复制到剪贴板: icon {icon_id}");
                     }
                 }
             }

@@ -897,15 +897,7 @@ impl App {
                 })
                 .clone();
 
-            log::debug!("new-only filter: active={}, state={}, new_items={}, set_size={}",
-                self.show_new_sheets_only,
-                self.sheet_list_state,
-                self.sheet_new_items.len(),
-                self.show_new_sheets_only.then(|| {
-                    let s: std::collections::HashSet<&str> = self.sheet_new_items.iter().map(String::as_str).collect();
-                    s.len()
-                }).unwrap_or(0)
-            );
+
             let sheets = match &pr_changed {
                 PrChangedState::Ready(changed) if PR_CHANGED_ONLY.get(ctx) => Rc::new(
                     sheets
@@ -921,10 +913,21 @@ impl App {
                 // Sort: favorited sheets first, then alphabetically
                 let mut sorted_sheets: Vec<(String, i32)> = sheets.to_vec();
                 if self.show_new_sheets_only && self.sheet_list_state.starts_with("ready") {
+                    // Debug: compare sample items
+                    let new_sample: Vec<&str> = self.sheet_new_items.iter().take(5).map(String::as_str).collect();
+                    let sheet_sample: Vec<&str> = sorted_sheets.iter().take(5).map(|(n,_)| n.as_str()).collect();
+                    log::debug!("new-items sample: {:?}", new_sample);
+                    log::debug!("sheets sample: {:?}", sheet_sample);
+                    // Check if any match
+                    let first_new = self.sheet_new_items.first();
+                    let match_found = first_new.map_or(false, |n| sorted_sheets.iter().any(|(s,_)| s == n));
+                    log::debug!("first new item matches any sheet: {}", match_found);
                     let set: std::collections::HashSet<&str> = self.sheet_new_items.iter().map(String::as_str).collect();
                     let before = sorted_sheets.len();
                     sorted_sheets.retain(|(name, _)| set.contains(name.as_str()));
-                    log::debug!("new-only filter: {} → {} sheets (set has {} items)", before, sorted_sheets.len(), set.len());
+                    if before != sorted_sheets.len() {
+                        log::debug!("new-only filter: {} → {} sheets", before, sorted_sheets.len());
+                    }
                 }
                 sorted_sheets.sort_by(|a, b| {
                     let a_fav = self.favorites.contains(&a.0);
