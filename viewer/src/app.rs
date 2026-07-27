@@ -914,19 +914,25 @@ impl App {
                 // Sort: favorited sheets first, then alphabetically
                 let mut sorted_sheets: Vec<(String, i32)> = sheets.to_vec();
                 if self.show_new_sheets_only && self.sheet_list_state.starts_with("ready") {
-                    // Bypass cache: check directly against excel.get_entries()
-                    let actual_entries: std::collections::HashSet<String> = self.backend.as_ref()
-                        .map(|b| b.excel().get_entries().keys().cloned().collect())
-                        .unwrap_or_default();
-                    let filtered: Vec<String> = self.sheet_new_items.iter()
-                        .filter(|name| actual_entries.contains(*name))
-                        .cloned()
-                        .collect();
-                    log::debug!("new-only direct check: {} new items, {} valid in get_entries", 
-                        self.sheet_new_items.len(), filtered.len());
-                    sorted_sheets.retain(|(name, _)| filtered.contains(name));
-                    if sorted_sheets.len() != 1198 {
-                        log::debug!("new-only filter result: {} sheets", sorted_sheets.len());
+                    // Check: are the new items misc sheets (negative ID)?
+                    if let Some(backend) = self.backend.as_ref() {
+                        let entries = backend.excel().get_entries();
+                        let first_new = self.sheet_new_items.first().cloned().unwrap_or_default();
+                        if let Some(id) = entries.get(&first_new) {
+                            log::debug!("first new item '{}' has id={} (misc={})", first_new, id, *id < 0);
+                        }
+                        // Build sorted_sheets from entries, not from cache
+                        let misc_shown = MISC_SHEETS_SHOWN.get(ctx);
+                        let new_set: std::collections::HashSet<&str> = self.sheet_new_items.iter().map(String::as_str).collect();
+                        let all_filtered: Vec<(String, i32)> = entries.iter()
+                            .filter(|(_, id)| misc_shown || **id >= 0)
+                            .filter(|(name, _)| new_set.contains(name.as_str()))
+                            .map(|(s, &id)| (s.clone(), id))
+                            .sorted_by(|a, b| a.0.cmp(&b.0))
+                            .collect();
+                        log::debug!("new-only: {} matching sheets from entries (cached had {}), replacing sorted_sheets", 
+                            all_filtered.len(), sorted_sheets.len());
+                        sorted_sheets = all_filtered;
                     }
                 }
                 sorted_sheets.sort_by(|a, b| {
