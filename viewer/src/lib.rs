@@ -27,6 +27,7 @@ pub mod audio;
 mod backend;
 pub mod config_file;
 pub mod data;
+pub mod diff;
 pub mod list_tracker;
 mod editable_schema;
 mod excel;

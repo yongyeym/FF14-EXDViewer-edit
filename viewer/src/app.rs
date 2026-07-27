@@ -191,6 +191,9 @@ pub struct App {
     music_new_items: Vec<String>,
     sheet_list_state: String,
     music_list_state: String,
+
+    // ── Version Diff ──
+    diff_state: crate::diff::DiffState,
 }
 
 fn create_router(ctx: egui::Context) -> Result<Router<App>> {
@@ -1222,6 +1225,24 @@ impl App {
                                 }
                             });
 
+                            if ui.button("版本Diff")
+                                .on_hover_text("对比两个版本的数据差异")
+                                .clicked()
+                            {
+                                let _sname = table.context().sheet().name().to_string();
+                                let versions = crate::diff::find_version_folders();
+                                let _latest_ver = versions.last().cloned().unwrap_or_else(|| "当前游戏解包数据".into());
+                                let old_ver = if versions.len() > 1 { versions[versions.len() - 1].clone() } else { "当前游戏解包数据".into() };
+                                self.diff_state = crate::diff::DiffState {
+                                    active: true,
+                                    old_version: old_ver,
+                                    new_version: "当前游戏解包数据".into(),
+                                    status: "selecting".into(),
+                                    diff_rows: Vec::new(),
+                                    columns: Vec::new(),
+                                };
+                            }
+
                             let exporting = self.export_promise.is_some();
                             if exporting {
                                 ui.spinner();
@@ -1313,12 +1334,24 @@ impl App {
                     log::error!("Failed to set schema: {e:?}");
                 }
 
+                // ── Version Diff ──
+                crate::diff::draw_diff_window(&mut self.diff_state, ui, &sheet_name);
+
                 let scroll_to = TEMP_SCROLL_TO.take(ctx);
                 if let Some((row_pos, _)) = &scroll_to {
                     TEMP_HIGHLIGHTED_ROW.set(ctx, *row_pos);
                 }
 
-                let resp = table.draw(ui, scroll_to);
+                let diff_state_owned = if self.diff_state.active && self.diff_state.status == "done" {
+                    Some(self.diff_state.clone())
+                } else {
+                    None
+                };
+                let resp = if let Some(ref ds) = diff_state_owned {
+                    crate::diff::draw_diff_table(ds, ui)
+                } else {
+                    table.draw(ui, scroll_to)
+                };
                 match resp {
                     CellResponse::None => {}
                     CellResponse::Icon(..) => {}
@@ -1403,6 +1436,15 @@ impl App {
             }
         }
     }
+
+    // ── Version Diff ────────────────────────────────────────────
+
+
+
+
+
+
+
 
     fn on_setup(
         &mut self,
@@ -1883,12 +1925,9 @@ impl App {
             .map(|v| v.to_string())
             .unwrap_or_else(|| "local".to_string());
         let export_dir = if resolve_display_field {
-            export_base.join(&version_dir_name).join("favorites")
+            export_base.join(&version_dir_name)
         } else {
-            export_base
-                .join(&version_dir_name)
-                .join("favorites")
-                .join("raw")
+            export_base.join(&version_dir_name)
         };
         let _ = std::fs::create_dir_all(&export_dir);
 
@@ -2351,6 +2390,7 @@ impl App {
             music_new_items: Vec::new(),
             sheet_list_state: "loading".to_string(),
             music_list_state: "loading".to_string(),
+            diff_state: crate::diff::DiffState::new(),
         }
     }
 
