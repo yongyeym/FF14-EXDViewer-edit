@@ -283,10 +283,16 @@ pub enum DiffAction {
     Compare { old: String, new: String, sheet: String },
 }
 
-pub fn draw_diff_table(diff: &DiffState, ui: &mut egui::Ui, _context: &crate::sheet::TableContext) -> CellResponse {
+pub fn draw_diff_table(diff: &DiffState, ui: &mut egui::Ui, context: &crate::sheet::TableContext) -> CellResponse {
+    use crate::excel::provider::ExcelHeader;
+    use crate::sheet::cell::draw_icon;
+
     let rows = &diff.diff_rows;
     let cols = &diff.columns;
+    let ctx = context.global();
+    let sheet_name = context.sheet().name();
     let data_col_start = if cols.len() > 1 && cols[1] == "Subrow" { 2 } else { 1 };
+    let col_count = context.column_count();
 
     egui::ScrollArea::both().auto_shrink(false).id_salt("diff_full").show(ui, |ui| {
         ui.horizontal(|ui| {
@@ -307,8 +313,14 @@ pub fn draw_diff_table(diff: &DiffState, ui: &mut egui::Ui, _context: &crate::sh
                 ui.add(egui::Label::new(m).sense(egui::Sense::click()));
                 ui.label(&row.row_key);
 
-                for cell in &row.cells {
-                    ui.add(egui::Label::new(cell.as_str()).sense(egui::Sense::click()).wrap_mode(egui::TextWrapMode::Truncate));
+                for ci in 0..row.cells.len() {
+                    if ci < col_count && context.is_icon_column(ci) {
+                        if let Ok(id) = row.cells[ci].parse::<u32>() {
+                            draw_icon(ctx, ui, id, sheet_name, &cols.get(data_col_start + ci).cloned().unwrap_or_default());
+                            continue;
+                        }
+                    }
+                    ui.add(egui::Label::new(row.cells[ci].as_str()).sense(egui::Sense::click()).wrap_mode(egui::TextWrapMode::Truncate));
                 }
             });
         }

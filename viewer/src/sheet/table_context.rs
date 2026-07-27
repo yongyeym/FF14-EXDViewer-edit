@@ -260,6 +260,20 @@ impl TableContext {
         self.0.display_column_idx.get()
     }
 
+    /// Returns true if the column at the given index is an Icon type.
+    pub fn is_icon_column(&self, column_idx: usize) -> bool {
+        self.0
+            .schema_columns
+            .borrow()
+            .get(column_idx)
+            .map_or(false, |sc| {
+                matches!(
+                    sc.meta(),
+                    crate::sheet::schema_column::SchemaColumnMeta::Icon
+                )
+            })
+    }
+
     pub fn display_field_cell<'a>(&'a self, row: ExcelRow<'a>) -> Option<anyhow::Result<Cell<'a>>> {
         Some(self.cell_by_offset(row, self.0.display_column_idx.get()?))
     }
