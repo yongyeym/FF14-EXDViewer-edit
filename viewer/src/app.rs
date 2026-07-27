@@ -1793,7 +1793,11 @@ impl App {
             crate::list_tracker::ComparisonResult::NewItems(items) => {
                 let count = items.len();
                 log::debug!("New sheet items ({}): {:?}", count, &items[..count.min(5)]);
-                self.sheet_new_items = items;
+                // Cross-validate against actual excel entries
+                let valid: std::collections::HashSet<&str> = backend.excel().get_entries().keys().map(String::as_str).collect();
+                let validated: Vec<String> = items.into_iter().filter(|name| valid.contains(name.as_str())).collect();
+                log::debug!("Validated new items: {} (of {} raw)", validated.len(), count);
+                self.sheet_new_items = validated;
                 format!("ready:{count}")
             }
             crate::list_tracker::ComparisonResult::Error(e) => format!("error:{e}"),
@@ -1836,7 +1840,11 @@ impl App {
                                     crate::list_tracker::ComparisonResult::SameVersion => "no_changes".into(),
                                     crate::list_tracker::ComparisonResult::NewItems(items) => {
                                         let c = items.len();
-                                        self.music_new_items = items;
+                                        // Cross-validate music paths against actual loaded rows
+                                        let valid: std::collections::HashSet<&str> = self.music.rows.iter().map(|r| r.path.as_str()).collect();
+                                        let validated: Vec<String> = items.into_iter().filter(|name| valid.contains(name.as_str())).collect();
+                                        log::debug!("Validated music new items: {} (of {} raw)", validated.len(), c);
+                                        self.music_new_items = validated;
                                         format!("ready:{c}")
                                     }
                                     crate::list_tracker::ComparisonResult::Error(e) => format!("error:{e}"),
