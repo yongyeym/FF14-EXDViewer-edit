@@ -553,13 +553,15 @@ impl App {
                             if ui.button("导出全部CSV").clicked() {
                                 let lang = LANGUAGE.get(ctx);
                                 if let Some(backend) = self.backend.clone() {
-                                    let version = BACKEND_CONFIG.get(ctx).and_then(|c| {
-                                        if let InstallLocation::Web(_, _, v) = &c.location {
-                                            v.clone()
-                                        } else {
-                                            None
-                                        }
-                                    });
+                                    let version = self.backend.as_ref().and_then(|b| b.game_version())
+                                        .and_then(|v| GameVersion::new(v).ok())
+                                        .or_else(|| BACKEND_CONFIG.get(ctx).and_then(|c| {
+                                            if let InstallLocation::Web(_, _, v) = &c.location {
+                                                v.clone()
+                                            } else {
+                                                None
+                                            }
+                                        }));
                                     self.command_export_all_csv(
                                         backend, lang, true, version,
                                     );
@@ -569,13 +571,15 @@ impl App {
                             if ui.button("导出全部CSV源文件").clicked() {
                                 let lang = LANGUAGE.get(ctx);
                                 if let Some(backend) = self.backend.clone() {
-                                    let version = BACKEND_CONFIG.get(ctx).and_then(|c| {
-                                        if let InstallLocation::Web(_, _, v) = &c.location {
-                                            v.clone()
-                                        } else {
-                                            None
-                                        }
-                                    });
+                                    let version = self.backend.as_ref().and_then(|b| b.game_version())
+                                        .and_then(|v| GameVersion::new(v).ok())
+                                        .or_else(|| BACKEND_CONFIG.get(ctx).and_then(|c| {
+                                            if let InstallLocation::Web(_, _, v) = &c.location {
+                                                v.clone()
+                                            } else {
+                                                None
+                                            }
+                                        }));
                                     self.command_export_all_csv(
                                         backend, lang, false, version,
                                     );
@@ -583,32 +587,36 @@ impl App {
                                 ui.close();
                             }
                             ui.separator();
-                            if ui.button("导出收藏的CSV").clicked() {
+                            if ui.button("导出收藏CSV").clicked() {
                                 let lang = LANGUAGE.get(ctx);
                                 if let Some(backend) = self.backend.clone() {
-                                    let version = BACKEND_CONFIG.get(ctx).and_then(|c| {
-                                        if let InstallLocation::Web(_, _, v) = &c.location {
-                                            v.clone()
-                                        } else {
-                                            None
-                                        }
-                                    });
+                                    let version = self.backend.as_ref().and_then(|b| b.game_version())
+                                        .and_then(|v| GameVersion::new(v).ok())
+                                        .or_else(|| BACKEND_CONFIG.get(ctx).and_then(|c| {
+                                            if let InstallLocation::Web(_, _, v) = &c.location {
+                                                v.clone()
+                                            } else {
+                                                None
+                                            }
+                                        }));
                                     self.command_export_favorites_csv(
                                         backend, lang, true, version,
                                     );
                                 }
                                 ui.close();
                             }
-                            if ui.button("导出收藏的CSV源文件").clicked() {
+                            if ui.button("导出收藏CSV源文件").clicked() {
                                 let lang = LANGUAGE.get(ctx);
                                 if let Some(backend) = self.backend.clone() {
-                                    let version = BACKEND_CONFIG.get(ctx).and_then(|c| {
-                                        if let InstallLocation::Web(_, _, v) = &c.location {
-                                            v.clone()
-                                        } else {
-                                            None
-                                        }
-                                    });
+                                    let version = self.backend.as_ref().and_then(|b| b.game_version())
+                                        .and_then(|v| GameVersion::new(v).ok())
+                                        .or_else(|| BACKEND_CONFIG.get(ctx).and_then(|c| {
+                                            if let InstallLocation::Web(_, _, v) = &c.location {
+                                                v.clone()
+                                            } else {
+                                                None
+                                            }
+                                        }));
                                     self.command_export_favorites_csv(
                                         backend, lang, false, version,
                                     );
@@ -623,6 +631,18 @@ impl App {
                                 ui.close();
                             }
                         });
+                    }
+
+                    // ¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯
+                    // Data source version display
+                    if let Some(backend) = &self.backend {
+                        if let Some(ver) = backend.game_version() {
+                            ui.label(
+                                egui::RichText::new(format!("数据版本: {ver}"))
+                                    .color(egui::Color32::from_gray(160))
+                                    .size(12.0)
+                            );
+                        }
                     }
 
                     let seg = egui::vec2(72.0, ui.spacing().interact_size.y);

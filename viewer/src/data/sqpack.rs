@@ -22,7 +22,13 @@ impl SqpackFileProvider {
     }
 
     pub fn game_version(&self) -> Option<String> {
-        self.0.version("HEAD").ok().map(|v| v.trim().to_string())
+        let version = self.0.version("HEAD").ok().map(|v| v.trim().to_string());
+        if let Some(ref v) = version {
+            log::info!("检测到游戏版本: {v}");
+        } else {
+            log::warn!("无法读取 ffxivgame.ver");
+        }
+        version
     }
 }
 
