@@ -1286,13 +1286,15 @@ impl App {
                 ExportAction::All(resolve_display_field) => {
                     let lang = LANGUAGE.get(ui.ctx());
                     if let Some(backend) = self.backend.clone() {
-                        let version = BACKEND_CONFIG.get(ui.ctx()).and_then(|c| {
-                            if let InstallLocation::Web(_, _, v) = &c.location {
-                                v.clone()
-                            } else {
-                                None
-                            }
-                        });
+                        let version = self.backend.as_ref().and_then(|b| b.game_version())
+                            .and_then(|v| GameVersion::new(v).ok())
+                            .or_else(|| BACKEND_CONFIG.get(ui.ctx()).and_then(|c| {
+                                if let InstallLocation::Web(_, _, v) = &c.location {
+                                    v.clone()
+                                } else {
+                                    None
+                                }
+                            }));
                         self.command_export_all_csv(
                             backend,
                             lang,
@@ -1304,13 +1306,15 @@ impl App {
                 ExportAction::Favorites(resolve_display_field) => {
                     let lang = LANGUAGE.get(ui.ctx());
                     if let Some(backend) = self.backend.clone() {
-                        let version = BACKEND_CONFIG.get(ui.ctx()).and_then(|c| {
-                            if let InstallLocation::Web(_, _, v) = &c.location {
-                                v.clone()
-                            } else {
-                                None
-                            }
-                        });
+                        let version = self.backend.as_ref().and_then(|b| b.game_version())
+                            .and_then(|v| GameVersion::new(v).ok())
+                            .or_else(|| BACKEND_CONFIG.get(ui.ctx()).and_then(|c| {
+                                if let InstallLocation::Web(_, _, v) = &c.location {
+                                    v.clone()
+                                } else {
+                                    None
+                                }
+                            }));
                         self.command_export_favorites_csv(
                             backend,
                             lang,

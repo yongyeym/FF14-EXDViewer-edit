@@ -20,6 +20,10 @@ impl SqpackFileProvider {
         let ironworks = Ironworks::new().with_resource(resource);
         Self(ironworks)
     }
+
+    pub fn game_version(&self) -> Option<String> {
+        self.0.version("HEAD").ok().map(|v| v.trim().to_string())
+    }
 }
 
 #[async_trait(?Send)]

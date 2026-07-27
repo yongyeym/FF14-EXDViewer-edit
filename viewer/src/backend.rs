@@ -15,16 +15,19 @@ struct BackendImpl {
     files: Rc<dyn FileProvider>,
     excel_provider: CachedProvider,
     schema_provider: BoxedSchemaProvider,
+    game_version: Option<String>,
 }
 
 impl Backend {
     pub async fn new(config: BackendConfig) -> Result<Self> {
         let excel = async {
+            let mut game_version = None;
             let (files, cache_size): (Rc<dyn FileProvider>, usize) = match config.location {
                 #[cfg(not(target_arch = "wasm32"))]
                 InstallLocation::Sqpack(path) => {
-                    let files: Rc<dyn FileProvider> =
-                        Rc::new(crate::data::sqpack::SqpackFileProvider::new(&path));
+                    let provider = crate::data::sqpack::SqpackFileProvider::new(&path);
+                    game_version = provider.game_version();
+                    let files: Rc<dyn FileProvider> = Rc::new(provider);
                     (files, 64)
                 }
                 #[cfg(target_arch = "wasm32")]
@@ -52,7 +55,7 @@ impl Backend {
             };
             let excel_provider =
                 CachedProvider::new(files.clone(), NonZeroUsize::new(cache_size).unwrap()).await?;
-            anyhow::Result::<_>::Ok((files, excel_provider))
+            anyhow::Result::<_>::Ok((files, excel_provider, game_version))
         };
         let schema = async {
             anyhow::Result::<_>::Ok(match config.schema {
@@ -81,11 +84,12 @@ impl Backend {
                 }
             })
         };
-        let ((files, excel_provider), schema) = futures_util::try_join!(excel, schema)?;
+        let ((files, excel_provider, game_version), schema) = futures_util::try_join!(excel, schema)?;
         Ok(Self(Rc::new(BackendImpl {
             files,
             excel_provider,
             schema_provider: schema,
+            game_version,
         })))
     }
 
@@ -102,6 +106,12 @@ impl Backend {
 
     pub fn schema(&self) -> &BoxedSchemaProvider {
         &self.0.schema_provider
+    }
+
+    /// The game version string (e.g. "2024.01.01.0000.0000") when using local sqpack files.
+    /// Returns `None` when using web/external data sources.
+    pub fn game_version(&self) -> Option<&str> {
+        self.0.game_version.as_deref()
     }
 }
 
