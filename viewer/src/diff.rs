@@ -316,9 +316,14 @@ pub fn draw_diff_table(diff: &DiffState, ui: &mut egui::Ui, context: &crate::she
                 for ci in 0..row.cells.len() {
                     if ci < col_count && context.is_icon_column(ci) {
                         if let Ok(id) = row.cells[ci].parse::<u32>() {
+                            log::debug!("diff: rendering icon at col {} id={}", ci, id);
                             draw_icon(ctx, ui, id, sheet_name, &cols.get(data_col_start + ci).cloned().unwrap_or_default());
                             continue;
                         }
+                    }
+                    if ci == 0 && std::ptr::eq(row, &rows[0]) && row.cells.len() > 2 {
+                        log::debug!("diff: cell[0]='{}' is_icon={} col_count={} cells_len={} data_col_start={}", 
+                            row.cells[0], context.is_icon_column(ci), col_count, row.cells.len(), data_col_start);
                     }
                     ui.add(egui::Label::new(row.cells[ci].as_str()).sense(egui::Sense::click()).wrap_mode(egui::TextWrapMode::Truncate));
                 }
