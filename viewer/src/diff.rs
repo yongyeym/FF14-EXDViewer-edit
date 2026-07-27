@@ -72,6 +72,7 @@ pub fn has_csv_for_sheet(version: &str, sheet_name: &str) -> bool {
 /// Uses case-insensitive hashing to avoid FALSE/false noise.
 fn load_csv_ci(version: &str, sheet_name: &str) -> Result<(Vec<String>, HashMap<String, (u64, Vec<String>)>), String> {
     let csv_path = exe_export_data_dir().join(version).join(format!("{sheet_name}.csv"));
+    log::debug!("load_csv_ci: {:?}", csv_path);
     let raw = std::fs::read(&csv_path).map_err(|e| format!("读取CSV失败: {e}"))?;
     let content = if raw.starts_with(b"\xef\xbb\xbf") {
         String::from_utf8_lossy(&raw[3..]).to_string()
@@ -193,9 +194,10 @@ pub fn start_background_diff(
             },
         };
 
-        let mut lock = r2.lock().unwrap();
-        *lock = Some(diff_result);
-        log::info!("后台Diff结果已就绪");
+        match r2.lock() {
+            Ok(mut lock) => { *lock = Some(diff_result); log::info!("后台Diff结果已就绪"); }
+            Err(e) => log::error!("后台Diff Mutex损坏: {e}"),
+        }
     });
 
     result
@@ -415,5 +417,5 @@ impl egui_table::TableDelegate for DiffTableDelegate<'_> {
 fn exe_export_data_dir() -> PathBuf {
     std::env::current_exe().ok()
         .and_then(|p| p.parent().map(|p| p.join("export").join("data")))
-        .unwrap_or_else(|| PathBuf::from("export/data"))
+        .unwrap_or_else(|| { log::warn!("无法获取exe路径，使用export/data"); PathBuf::from("export/data") })
 }
