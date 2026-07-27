@@ -173,7 +173,7 @@ pub struct App {
     /// Promise for loading list diffs (sheets/music) on startup.
     list_promise: Option<TrackedPromise<()>>,
     /// Promise for version diff computation (runs in background).
-    diff_promise: Option<TrackedPromise<crate::diff::DiffResult>>,
+    diff_result: crate::diff::DiffSharedResult,
     /// Promise for auto-initializing with saved config on restart, skipping setup page.
     auto_init_promise: Option<UnsendPromise<anyhow::Result<(Backend, BackendConfig)>>>,
     pr_window: PrWindow,
@@ -897,9 +897,20 @@ impl App {
                 })
                 .clone();
 
+            log::debug!("new-only filter: active={}, state={}, new_items={}, set_size={}",
+                self.show_new_sheets_only,
+                self.sheet_list_state,
+                self.sheet_new_items.len(),
+                self.show_new_sheets_only.then(|| {
+                    let s: std::collections::HashSet<&str> = self.sheet_new_items.iter().map(String::as_str).collect();
+                    s.len()
+                }).unwrap_or(0)
+            );
             let sheets = if self.show_new_sheets_only && self.sheet_list_state.starts_with("ready") {
                 let set: std::collections::HashSet<&str> = self.sheet_new_items.iter().map(String::as_str).collect();
-                Rc::new(sheets.iter().filter(|(name, _)| set.contains(name.as_str())).cloned().collect())
+                let filtered: Vec<(String, i32)> = sheets.iter().filter(|(name, _)| set.contains(name.as_str())).cloned().collect();
+                log::debug!("new-only filter: {} sheets in cache, {} matched", sheets.len(), filtered.len());
+                Rc::new(filtered)
             } else { sheets };
             let sheets = match &pr_changed {
                 PrChangedState::Ready(changed) if PR_CHANGED_ONLY.get(ctx) => Rc::new(
@@ -1323,40 +1334,15 @@ impl App {
                 // ── Version Diff ──
                 let sheet_name = table.context().sheet().name().to_string();
                 if let Some(action) = crate::diff::draw_diff_window(
-                    &mut self.diff_state, ui, &sheet_name,
+                    &mut self.diff_state, ui, &sheet_name, &self.diff_result,
                 ) {
                     match action {
                         crate::diff::DiffAction::Compare { old, new, sheet } => {
                             self.diff_state.status = "comparing".into();
-                            self.diff_promise = Some(crate::utils::TrackedPromise::spawn_local(async move {
-                                crate::diff::run_diff_background(old, new, sheet)
-                            }));
+                            self.diff_result = crate::diff::start_background_diff(old, new, sheet);
                         }
                     }
                 }
-
-                // Poll diff promise
-                let mut diff_result = None;
-                if self.diff_state.status == "comparing" {
-                    if let Some(promise) = self.diff_promise.as_mut() {
-                        if let Some(result) = promise.try_get() {
-                            diff_result = Some(result.clone());
-                        }
-                    }
-                }
-                if diff_result.is_some() {
-                    self.diff_promise = None;
-                }
-                if let Some(result) = diff_result {
-                    if let Some(err) = &result.error {
-                            self.diff_state.status = format!("error:{err}");
-                        } else {
-                            self.diff_state.columns = result.columns.clone();
-                            self.diff_state.diff_rows = result.diff_rows.clone();
-                            self.diff_state.status = "done".into();
-                        }
-                    }
-
                 let scroll_to = TEMP_SCROLL_TO.take(ctx);
                 if let Some((row_pos, _)) = &scroll_to {
                     TEMP_HIGHLIGHTED_ROW.set(ctx, *row_pos);
@@ -1791,6 +1777,7 @@ impl App {
         let prev_path = Self::find_prev_list("sheet_list_", &safe_ver);
         let prev_list = prev_path.as_ref().and_then(|p| crate::list_tracker::load_list(p));
 
+        log::debug!("Sheet list: {} items, prev={:?}", sheet_names.len(), prev_path);
         self.sheet_list_state = match crate::list_tracker::compare_lists(
             &version, &sheet_list, prev_list.as_ref(),
         ) {
@@ -1802,6 +1789,7 @@ impl App {
             }
             crate::list_tracker::ComparisonResult::NewItems(items) => {
                 let count = items.len();
+                log::debug!("New sheet items ({}): {:?}", count, &items[..count.min(5)]);
                 self.sheet_new_items = items;
                 format!("ready:{count}")
             }
@@ -1812,7 +1800,7 @@ impl App {
         // ── Music list (async) ───────────────────────────────────
         let excel = backend.excel().clone();
         let version_clone = version.clone();
-        self.list_promise = Some(crate::utils::TrackedPromise::spawn_local(async move {
+        self.list_promise = Some(TrackedPromise::spawn_local(async move {
             let items = Self::load_music_list(excel).await;
             let safe_ver = version_clone.replace('.', "_");
             let cur_path = std::path::PathBuf::from("config")
@@ -2396,7 +2384,7 @@ impl App {
             save_promise: None,
             export_promise: None,
             list_promise: None,
-            diff_promise: None,
+            diff_result: std::sync::Arc::new(std::sync::Mutex::new(None)),
             auto_init_promise: None,
             pr_window: PrWindow::default(),
             goto_window: None,
