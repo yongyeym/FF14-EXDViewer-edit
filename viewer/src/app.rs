@@ -170,6 +170,8 @@ pub struct App {
     changed_schemas: Option<(ChangedSchemasKey, ConvertibleChangedSchemasPromise)>,
     save_promise: Option<TrackedPromise<()>>,
     export_promise: Option<TrackedPromise<()>>,
+    /// Promise for loading list diffs (sheets/music) on startup.
+    list_promise: Option<TrackedPromise<()>>,
     /// Promise for auto-initializing with saved config on restart, skipping setup page.
     auto_init_promise: Option<UnsendPromise<anyhow::Result<(Backend, BackendConfig)>>>,
     pr_window: PrWindow,
@@ -181,6 +183,14 @@ pub struct App {
     loaded_cjk: Option<CjkFont>,
     #[cfg(target_arch = "wasm32")]
     font_promise: Option<(CjkFont, UnsendPromise<anyhow::Result<Vec<u8>>>)>,
+
+    // ── New-only list tracking ──
+    show_new_sheets_only: bool,
+    show_new_music_only: bool,
+    sheet_new_items: Vec<String>,
+    music_new_items: Vec<String>,
+    sheet_list_state: String,
+    music_list_state: String,
 }
 
 fn create_router(ctx: egui::Context) -> Result<Router<App>> {
@@ -227,6 +237,7 @@ impl App {
         self.draw_menubar(ui, on_music);
         self.draw_logger(ui.ctx());
         self.draw_pr_window(ui.ctx());
+        self.poll_list_promise();
 
         CentralPanel::default().show(ui, |ui| {
             self.draw_router(ui);
@@ -780,6 +791,28 @@ impl App {
                         }
                     }
 
+                    // New-only sheet toggle
+                    let new_count = self.sheet_new_items.len();
+                    let is_ready = self.sheet_list_state.starts_with("ready");
+                    if is_ready && new_count > 0 {
+                        if ui
+                            .toggle_value(&mut self.show_new_sheets_only, "🔍")
+                            .on_hover_text(format!("仅显示新增项（{new_count} 项）"))
+                            .changed()
+                        {
+                            self.show_new_sheets_only = !self.show_new_sheets_only;
+                        }
+                    } else if self.sheet_list_state == "no_changes" {
+                        ui.label("✓")
+                            .on_hover_text("当前列表无变动");
+                    } else if self.sheet_list_state == "no_prev" {
+                        ui.label("①")
+                            .on_hover_text("首次运行，暂无旧版存档");
+                    } else if self.sheet_list_state.starts_with("error") {
+                        ui.label("⚠")
+                            .on_hover_text(&self.sheet_list_state);
+                    }
+
                     if ui
                         .add_sized(
                             Vec2::new(ui.available_width(), 0.0),
@@ -872,6 +905,21 @@ impl App {
                         .collect::<Vec<_>>(),
                 ),
                 _ => sheets,
+            };
+
+            // Apply new-only sheet filter
+            let sheets = if self.show_new_sheets_only && self.sheet_list_state.starts_with("ready") {
+                let new_set: std::collections::HashSet<&str> =
+                    self.sheet_new_items.iter().map(String::as_str).collect();
+                Rc::new(
+                    sheets
+                        .iter()
+                        .filter(|(name, _)| new_set.contains(name.as_str()))
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                )
+            } else {
+                sheets
             };
 
             egui::CentralPanel::default().show(ui, |ui| {
@@ -1408,6 +1456,7 @@ impl App {
                         BACKEND_CONFIG.set(ui.ctx(), Some(config.clone()));
                         crate::config_file::save_backend_config(&config);
                         self.auto_init_promise = None;
+                        self.init_list_tracker();
                         self.navigate("/sheet");
                     }
                     Err(e) => {
@@ -1449,6 +1498,7 @@ impl App {
             } else {
                 self.navigate("/sheet");
             }
+            self.init_list_tracker();
         }
     }
 
@@ -1577,6 +1627,12 @@ impl App {
     }
 
     fn draw_music(&mut self, ui: &mut egui::Ui, _path: &Path, _params: &Params<'_, '_>) {
+        // Sync new-only list tracking to music player
+        if self.music_list_state.starts_with("ready") {
+            let set: std::collections::HashSet<String> = self.music_new_items.iter().cloned().collect();
+            self.music.new_paths = set;
+        }
+
         if let Some(backend) = self.backend.clone()
             && let Some(event) = self.music.ui(ui, &backend)
         {
@@ -1632,7 +1688,146 @@ impl App {
             .collect()
     }
 
-    // ── Favorites system ──────────────────────────────────────────
+    // ── New-only list tracking ─────────────────────────────────────
+
+    fn init_list_tracker(&mut self) {
+        let Some(backend) = self.backend.as_ref() else {
+            self.sheet_list_state = "error:后端未初始化".to_string();
+            self.music_list_state = "error:后端未初始化".to_string();
+            return;
+        };
+
+        let version = match backend.game_version() {
+            Some(v) => v.to_string(),
+            None => {
+                // Web mode or no file access – feature not available
+                self.sheet_list_state = "error:网络模式不支持".to_string();
+                self.music_list_state = "error:网络模式不支持".to_string();
+                return;
+            }
+        };
+
+        // ── Sheet list ──────────────────────────────────────────
+        let sheet_names: Vec<String> = backend
+            .excel()
+            .get_entries()
+            .iter()
+            .map(|(name, _)| name.clone())
+            .sorted()
+            .collect();
+
+        let safe_ver = version.replace('.', "_");
+        let cur_path = std::path::PathBuf::from("config")
+            .join(format!("sheet_list_{safe_ver}.json"));
+        let sheet_list = crate::list_tracker::VersionedList {
+            version: version.clone(),
+            items: sheet_names.clone(),
+        };
+        crate::list_tracker::save_list(&cur_path, &sheet_list);
+
+        // Find previous version's list
+        let prev_path = Self::find_prev_list("sheet_list_", &safe_ver);
+        let prev_list = prev_path.as_ref().and_then(|p| crate::list_tracker::load_list(p));
+
+        self.sheet_list_state = match crate::list_tracker::compare_lists(
+            &version, &sheet_list, prev_list.as_ref(),
+        ) {
+            crate::list_tracker::ComparisonResult::NoPrevious => {
+                "no_prev".to_string()
+            }
+            crate::list_tracker::ComparisonResult::SameVersion => {
+                "no_changes".to_string()
+            }
+            crate::list_tracker::ComparisonResult::NewItems(items) => {
+                let count = items.len();
+                self.sheet_new_items = items;
+                format!("ready:{count}")
+            }
+            crate::list_tracker::ComparisonResult::Error(e) => format!("error:{e}"),
+        };
+        crate::list_tracker::cleanup_lists("sheet_list_", &version);
+
+        // ── Music list (async) ───────────────────────────────────
+        let excel = backend.excel().clone();
+        let version_clone = version.clone();
+        self.list_promise = Some(crate::utils::TrackedPromise::spawn_local(async move {
+            let items = Self::load_music_list(excel).await;
+            let safe_ver = version_clone.replace('.', "_");
+            let cur_path = std::path::PathBuf::from("config")
+                .join(format!("music_list_{safe_ver}.json"));
+            let music_list = crate::list_tracker::VersionedList {
+                version: version_clone.clone(),
+                items,
+            };
+            crate::list_tracker::save_list(&cur_path, &music_list);
+        }));
+    }
+
+    fn poll_list_promise(&mut self) {
+            if let Some(promise) = self.list_promise.as_mut() {
+                if promise.try_get().is_some() {
+                    let _ = self.list_promise.take();
+                    // Music list saved; now compare
+                    if let Some(backend) = self.backend.as_ref() {
+                        if let Some(version) = backend.game_version() {
+                            let safe_ver = version.replace('.', "_");
+                            let cur_path = std::path::PathBuf::from("config")
+                                .join(format!("music_list_{safe_ver}.json"));
+                            if let Some(list) = crate::list_tracker::load_list(&cur_path) {
+                                let prev_path = Self::find_prev_list("music_list_", &safe_ver);
+                                let prev = prev_path.as_ref().and_then(crate::list_tracker::load_list);
+                                self.music_list_state = match crate::list_tracker::compare_lists(
+                                    version, &list, prev.as_ref(),
+                                ) {
+                                    crate::list_tracker::ComparisonResult::NoPrevious => "no_prev".into(),
+                                    crate::list_tracker::ComparisonResult::SameVersion => "no_changes".into(),
+                                    crate::list_tracker::ComparisonResult::NewItems(items) => {
+                                        let c = items.len();
+                                        self.music_new_items = items;
+                                        format!("ready:{c}")
+                                    }
+                                    crate::list_tracker::ComparisonResult::Error(e) => format!("error:{e}"),
+                                };
+                                crate::list_tracker::cleanup_lists("music_list_", version);
+                            }
+                        }
+                    }
+                }
+            }
+            }
+
+    fn find_prev_list(prefix: &str, current_safe: &str) -> Option<std::path::PathBuf> {
+        let dir = std::path::PathBuf::from("config");
+        let Ok(entries) = std::fs::read_dir(&dir) else { return None };
+        entries
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+            .map(|e| e.path())
+            .filter(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|name| name.starts_with(prefix) && !name.contains(current_safe))
+            })
+            .next()
+    }
+
+    async fn load_music_list(excel: crate::excel::base::CachedProvider) -> Vec<String> {
+        use crate::excel::provider::ExcelSheet;
+        let Ok(sheet) = excel.get_sheet("BGM", ironworks::excel::Language::None).await else {
+            return Vec::new();
+        };
+        let offset = sheet.columns().first().map(|c| u32::from(c.offset())).unwrap_or(0);
+        let mut items = Vec::new();
+        for row_id in sheet.get_row_ids() {
+            let Ok(row) = sheet.get_row(row_id) else { continue };
+            let Ok(cell) = row.read_string(offset) else { continue };
+            let path = String::from_utf8_lossy(cell.as_bytes()).into_owned();
+            if path.ends_with(".scd") {
+                items.push(path);
+            }
+        }
+        items
+    }
 
     fn favorites_path() -> std::path::PathBuf {
         std::env::current_exe()
@@ -2139,6 +2334,7 @@ impl App {
             changed_schemas: None,
             save_promise: None,
             export_promise: None,
+            list_promise: None,
             auto_init_promise: None,
             pr_window: PrWindow::default(),
             goto_window: None,
@@ -2148,6 +2344,13 @@ impl App {
             loaded_cjk: None,
             #[cfg(target_arch = "wasm32")]
             font_promise: None,
+
+            show_new_sheets_only: false,
+            show_new_music_only: false,
+            sheet_new_items: Vec::new(),
+            music_new_items: Vec::new(),
+            sheet_list_state: "loading".to_string(),
+            music_list_state: "loading".to_string(),
         }
     }
 

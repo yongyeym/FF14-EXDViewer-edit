@@ -122,6 +122,8 @@ pub struct MusicPlayer {
     volume: f32,
     search: String,
     show_unavailable: bool,
+    pub show_new_only: bool,
+    pub new_paths: std::collections::HashSet<String>,
     show_visualizer: bool,
     pub rows: Vec<TrackRow>,
     rows_stale: bool,
@@ -145,6 +147,8 @@ impl Default for MusicPlayer {
             volume: 1.0,
             search: String::new(),
             show_unavailable: false,
+            show_new_only: false,
+            new_paths: std::collections::HashSet::new(),
             show_visualizer: true,
             rows: Vec::new(),
             rows_stale: true,
@@ -474,6 +478,18 @@ impl MusicPlayer {
                         ui.toggle_value(&mut self.show_unavailable, "🚫")
                             .on_hover_text(format!("显示 {unavailable} 项 不可用的音频"));
                     }
+
+                    // New-only music toggle
+                    let new_count = self.new_paths.len();
+                    if new_count > 0 {
+                        if ui
+                            .toggle_value(&mut self.show_new_only, "🔍")
+                            .on_hover_text(format!("仅显示新增项（{new_count} 项）"))
+                            .changed()
+                        {
+                            self.show_new_only = !self.show_new_only;
+                        }
+                    }
                     ui.add_sized(
                         Vec2::new(ui.available_width(), 0.0),
                         TextEdit::singleline(&mut self.search).hint_text("筛选"),
@@ -509,7 +525,10 @@ impl MusicPlayer {
             query,
             self.rows
                 .iter()
-                .filter(|row| self.show_unavailable || row.available),
+                .filter(|row| self.show_unavailable || row.available)
+                .filter(|row| {
+                    !self.show_new_only || self.new_paths.contains(&row.path)
+                }),
             |row| row.name.as_str(),
         );
 
