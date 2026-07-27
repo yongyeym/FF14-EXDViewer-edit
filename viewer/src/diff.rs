@@ -111,17 +111,11 @@ pub fn load_csv_fast(
     for result in reader.records() {
         let record = result.map_err(|e| format!("CSV记录解析失败: {e}"))?;
         let row_id = record.get(0).unwrap_or("").to_string();
-        let subrow = record.get(1).map(|s| s.to_string()).unwrap_or_default();
-        let key = if subrow.is_empty() || subrow == "0" {
-            row_id
-        } else {
-            format!("{row_id}.{subrow}")
-        };
 
-        let values: Vec<String> = record.iter().skip(2).map(|v| v.to_string()).collect();
+        let values: Vec<String> = record.iter().skip(1).map(|v| v.to_string()).collect();
         let hash = row_hash(&values);
 
-        rows.entry(key).or_insert((hash, values));
+        rows.entry(row_id).or_insert((hash, values));
     }
 
     Ok((headers, rows))
@@ -352,7 +346,7 @@ pub fn draw_diff_table(diff: &DiffState, ui: &mut egui::Ui) -> CellResponse {
             .show(ui, |ui| {
                 ui.label("Row");
                 ui.label("Diff");
-                for col in columns.iter().skip(2) {
+                for col in columns.iter().skip(1) {
                     ui.label(col);
                 }
                 ui.end_row();

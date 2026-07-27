@@ -482,13 +482,8 @@ impl MusicPlayer {
                     // New-only music toggle
                     let new_count = self.new_paths.len();
                     if new_count > 0 {
-                        if ui
-                            .toggle_value(&mut self.show_new_only, "🔍")
-                            .on_hover_text(format!("仅显示新增项（{new_count} 项）"))
-                            .changed()
-                        {
-                            self.show_new_only = !self.show_new_only;
-                        }
+                        ui.toggle_value(&mut self.show_new_only, "🔍")
+                            .on_hover_text(format!("仅显示新增项（{new_count} 项）"));
                     }
                     ui.add_sized(
                         Vec2::new(ui.available_width(), 0.0),

@@ -800,13 +800,8 @@ impl App {
                     let new_count = self.sheet_new_items.len();
                     let is_ready = self.sheet_list_state.starts_with("ready");
                     if is_ready && new_count > 0 {
-                        if ui
-                            .toggle_value(&mut self.show_new_sheets_only, "🔍")
-                            .on_hover_text(format!("仅显示新增项（{new_count} 项）"))
-                            .changed()
-                        {
-                            self.show_new_sheets_only = !self.show_new_sheets_only;
-                        }
+                        ui.toggle_value(&mut self.show_new_sheets_only, "🔍")
+                            .on_hover_text(format!("仅显示新增项（{new_count} 项）"));
                     } else if self.sheet_list_state == "no_changes" {
                         ui.label("✓")
                             .on_hover_text("当前列表无变动");
