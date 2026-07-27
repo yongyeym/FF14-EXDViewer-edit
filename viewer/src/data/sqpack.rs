@@ -22,7 +22,8 @@ impl SqpackFileProvider {
     }
 
     pub fn game_version(&self) -> Option<String> {
-        let version = self.0.version("HEAD").ok().map(|v| v.trim().to_string());
+        // Use a valid two-segment path (category/repository) to extract repository 0 (ffxiv)
+        let version = self.0.version("exd/ffxiv").ok().map(|v| v.trim().to_string());
         if let Some(ref v) = version {
             log::info!("检测到游戏版本: {v}");
         } else {
