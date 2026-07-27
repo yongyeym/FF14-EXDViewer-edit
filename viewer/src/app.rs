@@ -1237,8 +1237,8 @@ impl App {
                                 .clicked()
                             {
                                 let versions = crate::diff::find_version_folders();
-                                let old_ver = if versions.len() > 1 { versions[versions.len() - 1].clone() } else { String::new() };
                                 let new_ver = versions.last().cloned().unwrap_or_default();
+                                let old_ver = if versions.len() > 1 { versions[versions.len() - 2].clone() } else { new_ver.clone() };
                                 self.diff_state = crate::diff::DiffState {
                                     active: true,
                                     old_version: old_ver,
