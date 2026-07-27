@@ -172,6 +172,8 @@ pub struct App {
     export_promise: Option<TrackedPromise<()>>,
     /// Promise for loading list diffs (sheets/music) on startup.
     list_promise: Option<TrackedPromise<()>>,
+    /// Promise for version diff computation (runs in background).
+    diff_promise: Option<TrackedPromise<crate::diff::DiffResult>>,
     /// Promise for auto-initializing with saved config on restart, skipping setup page.
     auto_init_promise: Option<UnsendPromise<anyhow::Result<(Backend, BackendConfig)>>>,
     pr_window: PrWindow,
@@ -1229,14 +1231,13 @@ impl App {
                                 .on_hover_text("对比两个版本的数据差异")
                                 .clicked()
                             {
-                                let _sname = table.context().sheet().name().to_string();
                                 let versions = crate::diff::find_version_folders();
-                                let _latest_ver = versions.last().cloned().unwrap_or_else(|| "当前游戏解包数据".into());
-                                let old_ver = if versions.len() > 1 { versions[versions.len() - 1].clone() } else { "当前游戏解包数据".into() };
+                                let old_ver = if versions.len() > 1 { versions[versions.len() - 1].clone() } else { String::new() };
+                                let new_ver = versions.last().cloned().unwrap_or_default();
                                 self.diff_state = crate::diff::DiffState {
                                     active: true,
                                     old_version: old_ver,
-                                    new_version: "当前游戏解包数据".into(),
+                                    new_version: new_ver,
                                     status: "selecting".into(),
                                     diff_rows: Vec::new(),
                                     columns: Vec::new(),
@@ -1335,7 +1336,41 @@ impl App {
                 }
 
                 // ── Version Diff ──
-                crate::diff::draw_diff_window(&mut self.diff_state, ui, &sheet_name);
+                let sheet_name = table.context().sheet().name().to_string();
+                if let Some(action) = crate::diff::draw_diff_window(
+                    &mut self.diff_state, ui, &sheet_name,
+                ) {
+                    match action {
+                        crate::diff::DiffAction::Compare { old, new, sheet } => {
+                            self.diff_state.status = "comparing".into();
+                            self.diff_promise = Some(crate::utils::TrackedPromise::spawn_local(async move {
+                                crate::diff::run_diff_background(old, new, sheet)
+                            }));
+                        }
+                    }
+                }
+
+                // Poll diff promise
+                let mut diff_result = None;
+                if self.diff_state.status == "comparing" {
+                    if let Some(promise) = self.diff_promise.as_mut() {
+                        if let Some(result) = promise.try_get() {
+                            diff_result = Some(result.clone());
+                        }
+                    }
+                }
+                if diff_result.is_some() {
+                    self.diff_promise = None;
+                }
+                if let Some(result) = diff_result {
+                    if let Some(err) = &result.error {
+                            self.diff_state.status = format!("error:{err}");
+                        } else {
+                            self.diff_state.columns = result.columns.clone();
+                            self.diff_state.diff_rows = result.diff_rows.clone();
+                            self.diff_state.status = "done".into();
+                        }
+                    }
 
                 let scroll_to = TEMP_SCROLL_TO.take(ctx);
                 if let Some((row_pos, _)) = &scroll_to {
@@ -2374,6 +2409,7 @@ impl App {
             save_promise: None,
             export_promise: None,
             list_promise: None,
+            diff_promise: None,
             auto_init_promise: None,
             pr_window: PrWindow::default(),
             goto_window: None,

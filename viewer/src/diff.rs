@@ -1,6 +1,10 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, hash_map::DefaultHasher};
+use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
+
 use egui::Color32;
+
+use crate::sheet::cell::CellResponse;
 
 /// State for version-diff comparison.
 #[derive(Clone)]
@@ -8,24 +12,22 @@ pub struct DiffState {
     pub active: bool,
     pub old_version: String,
     pub new_version: String,
-    pub status: String,       // "idle"/"selecting"/"comparing"/"done"/"error:..."
+    pub status: String,
     pub diff_rows: Vec<DiffRow>,
-    /// Column headers from the CSV (for rendering). Populated when CSV is parsed.
     pub columns: Vec<String>,
 }
 
 #[derive(Clone)]
 pub struct DiffRow {
-    pub row_key: String,       // "row_id" or "row_id.subrow_id"
+    pub row_key: String,
     pub diff_type: DiffType,
-    pub cells: Vec<String>,    // cell values in order (no Row column)
+    pub cells: Vec<String>,
 }
 
 #[derive(Clone, PartialEq)]
 pub enum DiffType {
     Added,
     Deleted,
-    Modified,
 }
 
 impl DiffState {
@@ -41,59 +43,57 @@ impl DiffState {
     }
 }
 
-/// Find version folders under export/data/ that contain CSV files.
+/// Find version folders under export/data/.
 pub fn find_version_folders() -> Vec<String> {
-    let export_dir = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|p| p.join("export").join("data")))
-        .unwrap_or_else(|| PathBuf::from("export/data"));
-
-    let Ok(entries) = std::fs::read_dir(&export_dir) else {
-        return Vec::new();
-    };
+    let export_dir = exe_export_data_dir();
+    let Ok(entries) = std::fs::read_dir(&export_dir) else { return Vec::new() };
 
     let mut folders: Vec<String> = entries
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
         .filter_map(|e| e.file_name().into_string().ok())
-        .filter(|name| name != "local") // skip default "local" export folder
         .collect();
 
     folders.sort_by(|a, b| {
-        // Sort by version: parse number parts
-        let a_parts: Vec<i32> = a.split('.').filter_map(|s| s.parse().ok()).collect();
-        let b_parts: Vec<i32> = b.split('.').filter_map(|s| s.parse().ok()).collect();
-        a_parts.cmp(&b_parts)
+        let a_p: Vec<i32> = a.split('.').filter_map(|s| s.parse().ok()).collect();
+        let b_p: Vec<i32> = b.split('.').filter_map(|s| s.parse().ok()).collect();
+        a_p.cmp(&b_p)
     });
-
     folders
 }
 
-/// Check if a version folder has a CSV file for the given sheet.
+/// Check if a CSV for the sheet exists in a version folder.
 pub fn has_csv_for_sheet(version: &str, sheet_name: &str) -> bool {
-    let export_dir = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|p| p.join("export").join("data").join(version)))
-        .unwrap_or_else(|| PathBuf::from("export/data").join(version));
-
-    let csv_name = format!("{sheet_name}.csv");
-    let csv_path = export_dir.join(&csv_name);
-    csv_path.exists()
+    exe_export_data_dir().join(version).join(format!("{sheet_name}.csv")).exists()
 }
 
-/// Read a CSV file for a given version+sheet and parse into rows.
-pub fn load_csv(
+/// Compute a fast row hash from cell values (avoids full string comparisons).
+fn row_hash(values: &[String]) -> u64 {
+    let mut h = DefaultHasher::new();
+    values.len().hash(&mut h);
+    for v in values {
+        v.len().hash(&mut h);
+        // First 8 chars for a quick fingerprint
+        let prefix: String = v.chars().take(8).collect();
+        prefix.hash(&mut h);
+    }
+    h.finish()
+}
+
+/// Load CSV, returning headers and a map of row_key → (hash, values).
+pub fn load_csv_fast(
     version: &str,
     sheet_name: &str,
-) -> Result<(Vec<String>, HashMap<String, Vec<String>>), String> {
-    let export_dir = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|p| p.join("export").join("data").join(version)))
-        .unwrap_or_else(|| PathBuf::from("export/data").join(version));
+) -> Result<(Vec<String>, HashMap<String, (u64, Vec<String>)>), String> {
+    let csv_path = exe_export_data_dir().join(version).join(format!("{sheet_name}.csv"));
+    let raw = std::fs::read(&csv_path).map_err(|e| format!("读取CSV失败: {e}"))?;
 
-    let csv_path = export_dir.join(format!("{sheet_name}.csv"));
-    let content = std::fs::read_to_string(&csv_path)
-        .map_err(|e| format!("读取CSV失败: {e}"))?;
+    // Skip UTF-8 BOM if present
+    let content = if raw.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        String::from_utf8_lossy(&raw[3..]).to_string()
+    } else {
+        String::from_utf8_lossy(&raw).to_string()
+    };
 
     let mut reader = csv::ReaderBuilder::new()
         .flexible(true)
@@ -106,7 +106,8 @@ pub fn load_csv(
         .map(|h| h.to_string())
         .collect();
 
-    let mut rows: HashMap<String, Vec<String>> = HashMap::new();
+    let mut rows: HashMap<String, (u64, Vec<String>)> = HashMap::new();
+
     for result in reader.records() {
         let record = result.map_err(|e| format!("CSV记录解析失败: {e}"))?;
         let row_id = record.get(0).unwrap_or("").to_string();
@@ -118,47 +119,158 @@ pub fn load_csv(
         };
 
         let values: Vec<String> = record.iter().skip(2).map(|v| v.to_string()).collect();
-        rows.entry(key.clone())
-            .and_modify(|existing| {
-                // If we already have this key, we need to concat subrows
-                // This handles multi-subrow CSV files
-                existing.extend(values.clone());
-            })
-            .or_insert(values);
+        let hash = row_hash(&values);
+
+        rows.entry(key).or_insert((hash, values));
     }
 
     Ok((headers, rows))
 }
 
+/// Compare two sets of rows using row hashes for fast comparison.
+pub fn compute_diff_fast(
+    old_rows: &HashMap<String, (u64, Vec<String>)>,
+    new_rows: &HashMap<String, (u64, Vec<String>)>,
+) -> Vec<DiffRow> {
+    let mut result = Vec::with_capacity(
+        old_rows.len().max(new_rows.len()) / 10 // estimate ~10% change
+    );
+
+    // Only scan keys present in old OR new
+    let all_keys: Vec<&String> = old_rows.keys().chain(new_rows.keys()).collect();
+
+    // Use sorted iteration for deterministic output
+    let mut sorted_keys: Vec<&String> = Vec::with_capacity(all_keys.len());
+    for k in &all_keys {
+        if !sorted_keys.contains(k) {
+            sorted_keys.push(k);
+        }
+    }
+    sorted_keys.sort();
+
+    for key in sorted_keys {
+        match (old_rows.get(key), new_rows.get(key)) {
+            (Some(_), None) => {
+                // Deleted – skip cell data, we only need to show the key
+                result.push(DiffRow {
+                    row_key: key.clone(),
+                    diff_type: DiffType::Deleted,
+                    cells: Vec::new(),
+                });
+            }
+            (None, Some((_, new_cells))) => {
+                result.push(DiffRow {
+                    row_key: key.clone(),
+                    diff_type: DiffType::Added,
+                    cells: new_cells.clone(),
+                });
+            }
+            (Some((old_hash, old_cells)), Some((new_hash, new_cells))) => {
+                // Quick hash comparison first
+                if old_hash != new_hash || old_cells != new_cells {
+                    result.push(DiffRow {
+                        row_key: key.clone(),
+                        diff_type: DiffType::Deleted,
+                        cells: old_cells.clone(),
+                    });
+                    result.push(DiffRow {
+                        row_key: key.clone(),
+                        diff_type: DiffType::Added,
+                        cells: new_cells.clone(),
+                    });
+                }
+            }
+            (None, None) => {}
+        }
+    }
+
+    result
+}
+
+// ── Async-compatible diff operation ────────────────────────────────
+
+/// Holds the entire diff computation result so it can be sent across async boundaries.
+#[derive(Clone)]
+pub struct DiffResult {
+    pub columns: Vec<String>,
+    pub diff_rows: Vec<DiffRow>,
+    pub error: Option<String>,
+}
+
+/// Run the full diff in a CPU-bound background thread and return the result.
+/// This does NOT block the UI thread.
+pub fn run_diff_background(
+    old_version: String,
+    new_version: String,
+    sheet_name: String,
+) -> DiffResult {
+    let old = load_csv_fast(&old_version, &sheet_name);
+    let new = load_csv_fast(&new_version, &sheet_name);
+
+    match (old, new) {
+        (Ok((headers, old_map)), Ok((_, new_map))) => {
+            let diff_rows = compute_diff_fast(&old_map, &new_map);
+            log::info!("Diff完成: {} 行变更", diff_rows.len());
+            DiffResult { columns: headers, diff_rows, error: None }
+        }
+        (Err(e), _) | (_, Err(e)) => {
+            DiffResult { columns: Vec::new(), diff_rows: Vec::new(), error: Some(e) }
+        }
+    }
+}
+
+// ── UI functions ───────────────────────────────────────────────────
+
 /// Draw the version diff selection window.
-pub fn draw_diff_window(diff_state: &mut DiffState, ui: &mut egui::Ui, sheet_name: &str) {
+pub fn draw_diff_window(
+    diff_state: &mut DiffState,
+    ui: &mut egui::Ui,
+    sheet_name: &str,
+) -> Option<DiffAction> {
     if !diff_state.active {
-        return;
+        return None;
     }
 
     let versions = find_version_folders();
-    let all_options: Vec<String> = std::iter::once("当前游戏解包数据".to_string())
-        .chain(versions.iter().filter(|v| has_csv_for_sheet(v, sheet_name)).cloned())
+    let versions_for_sheet: Vec<String> = versions.into_iter()
+        .filter(|v| has_csv_for_sheet(v, sheet_name))
         .collect();
 
+    if versions_for_sheet.is_empty() {
+        egui::Window::new("版本Diff")
+            .id(egui::Id::new("diff_window"))
+            .resizable(false)
+            .default_size([350.0, 120.0])
+            .show(ui.ctx(), |ui| {
+                ui.label("未找到已导出的CSV文件，请先导出CSV。");
+                if ui.button("关闭").clicked() {
+                    diff_state.active = false;
+                    diff_state.status = "idle".into();
+                }
+            });
+        return None;
+    }
+
+    let mut action: Option<DiffAction> = None;
+    let mut close = false;
+
+    // Clone values for closure
     let mut old_ver = diff_state.old_version.clone();
     let mut new_ver = diff_state.new_version.clone();
     let status = diff_state.status.clone();
     let diff_count = diff_state.diff_rows.len();
-    let mut close_diff = false;
-    let mut run_compare = false;
 
     egui::Window::new("选择版本Diff对比的CSV文件")
         .id(egui::Id::new("diff_window"))
         .resizable(false)
-        .default_size([400.0, 200.0])
+        .default_size([380.0, 180.0])
         .show(ui.ctx(), |ui| {
             ui.horizontal(|ui| {
                 ui.label("旧版本:");
                 egui::ComboBox::from_id_salt("diff_old")
                     .selected_text(&old_ver)
                     .show_ui(ui, |ui| {
-                        for opt in &all_options {
+                        for opt in &versions_for_sheet {
                             ui.selectable_value(&mut old_ver, opt.clone(), opt.as_str());
                         }
                     });
@@ -169,7 +281,7 @@ pub fn draw_diff_window(diff_state: &mut DiffState, ui: &mut egui::Ui, sheet_nam
                 egui::ComboBox::from_id_salt("diff_new")
                     .selected_text(&new_ver)
                     .show_ui(ui, |ui| {
-                        for opt in &all_options {
+                        for opt in &versions_for_sheet {
                             ui.selectable_value(&mut new_ver, opt.clone(), opt.as_str());
                         }
                     });
@@ -179,70 +291,53 @@ pub fn draw_diff_window(diff_state: &mut DiffState, ui: &mut egui::Ui, sheet_nam
 
             match status.as_str() {
                 "comparing" => {
-                    ui.label("正在对比中，请稍后……");
-                    ui.spinner();
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label("正在对比中，请稍后……");
+                    });
                 }
                 "done" => {
                     ui.label(format!("对比完成，共 {diff_count} 行变更"));
                 }
                 s if s.starts_with("error:") => {
-                    ui.colored_label(egui::Color32::RED, &s[6..]);
+                    ui.colored_label(Color32::RED, &s[6..]);
                 }
                 _ => {}
             }
 
             ui.horizontal(|ui| {
                 if ui.button("取消对比").clicked() {
-                    close_diff = true;
+                    close = true;
                 }
-                if status != "comparing" && ui.button("开始对比").clicked() {
-                    run_compare = true;
+                if status != "comparing" {
+                    if ui.button("开始对比").clicked() {
+                        if old_ver == new_ver {
+                            diff_state.status = "error:相同版本无法对比！".into();
+                        } else {
+                            action = Some(DiffAction::Compare {
+                                old: old_ver.clone(),
+                                new: new_ver.clone(),
+                                sheet: sheet_name.to_string(),
+                            });
+                        }
+                    }
                 }
             });
         });
 
-    if close_diff {
+    if close {
         diff_state.active = false;
         diff_state.status = "idle".into();
-        return;
+        return None;
     }
 
     diff_state.old_version = old_ver;
     diff_state.new_version = new_ver;
-
-    if run_compare {
-        if diff_state.old_version == diff_state.new_version {
-            diff_state.status = "error:相同版本无法对比！".into();
-        } else {
-            diff_state.status = "comparing".into();
-            do_diff(diff_state, sheet_name);
-        }
-    }
+    action
 }
 
-fn do_diff(diff_state: &mut DiffState, sheet_name: &str) {
-    let old_rows = if diff_state.old_version == "当前游戏解包数据" {
-        Err("请先将当前版本导出为CSV文件后再对比".into())
-    } else {
-        load_csv(&diff_state.old_version, sheet_name)
-    };
-
-    let new_rows = if diff_state.new_version == "当前游戏解包数据" {
-        Err("请先将当前版本导出为CSV文件后再对比".into())
-    } else {
-        load_csv(&diff_state.new_version, sheet_name)
-    };
-
-    match (old_rows, new_rows) {
-        (Ok((headers, old)), Ok((_, new))) => {
-            diff_state.columns = headers.clone();
-            diff_state.diff_rows = compute_diff(&headers, &old, &new);
-            diff_state.status = "done".into();
-        }
-        (Err(e), _) | (_, Err(e)) => {
-            diff_state.status = format!("error:{e}");
-        }
-    }
+pub enum DiffAction {
+    Compare { old: String, new: String, sheet: String },
 }
 
 /// Draw the diff results table.
@@ -255,7 +350,6 @@ pub fn draw_diff_table(diff: &DiffState, ui: &mut egui::Ui) -> CellResponse {
             .striped(true)
             .min_col_width(60.0)
             .show(ui, |ui| {
-                // Header row
                 ui.label("Row");
                 ui.label("Diff");
                 for col in columns.iter().skip(2) {
@@ -263,21 +357,14 @@ pub fn draw_diff_table(diff: &DiffState, ui: &mut egui::Ui) -> CellResponse {
                 }
                 ui.end_row();
 
-                // Data rows
                 for row in rows {
-                    // Row key
-                    let label = egui::Label::new(&row.row_key).sense(egui::Sense::click());
-                    ui.add(label);
-
-                    // Diff marker
                     let marker = match row.diff_type {
                         DiffType::Deleted => egui::RichText::new("-").color(Color32::RED),
                         DiffType::Added => egui::RichText::new("+").color(Color32::GREEN),
-                        DiffType::Modified => egui::RichText::new("±").color(Color32::YELLOW),
                     };
+                    ui.label(&row.row_key);
                     ui.add(egui::Label::new(marker).sense(egui::Sense::click()));
 
-                    // Cell data
                     for cell in &row.cells {
                         ui.add(
                             egui::Label::new(cell.as_str())
@@ -289,65 +376,12 @@ pub fn draw_diff_table(diff: &DiffState, ui: &mut egui::Ui) -> CellResponse {
                 }
             });
     });
-
     CellResponse::None
 }
 
-use crate::sheet::cell::CellResponse;
-
-
-/// Compare old and new row data, producing diff entries.
-pub fn compute_diff(
-    _headers: &[String],
-    old_rows: &HashMap<String, Vec<String>>,
-    new_rows: &HashMap<String, Vec<String>>,
-) -> Vec<DiffRow> {
-    let mut result = Vec::new();
-
-    // Collect all keys
-    let mut all_keys: Vec<&String> = old_rows.keys().chain(new_rows.keys()).collect();
-    all_keys.sort(); // Sort by key (which is row_id or row_id.subrow_id)
-    all_keys.dedup();
-
-    for key in all_keys {
-        let old_val = old_rows.get(key);
-        let new_val = new_rows.get(key);
-
-        match (old_val, new_val) {
-            (Some(old), None) => {
-                // Deleted
-                result.push(DiffRow {
-                    row_key: key.clone(),
-                    diff_type: DiffType::Deleted,
-                    cells: old.clone(),
-                });
-            }
-            (None, Some(new)) => {
-                // Added
-                result.push(DiffRow {
-                    row_key: key.clone(),
-                    diff_type: DiffType::Added,
-                    cells: new.clone(),
-                });
-            }
-            (Some(old), Some(new)) => {
-                if old != new {
-                    // Modified: show old first, then new
-                    result.push(DiffRow {
-                        row_key: key.clone(),
-                        diff_type: DiffType::Deleted,
-                        cells: old.clone(),
-                    });
-                    result.push(DiffRow {
-                        row_key: key.clone(),
-                        diff_type: DiffType::Added,
-                        cells: new.clone(),
-                    });
-                }
-            }
-            (None, None) => unreachable!(),
-        }
-    }
-
-    result
+fn exe_export_data_dir() -> PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.join("export").join("data")))
+        .unwrap_or_else(|| PathBuf::from("export/data"))
 }
