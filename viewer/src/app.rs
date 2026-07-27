@@ -1348,42 +1348,7 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                     match action {
                         crate::diff::DiffAction::Compare { old, new, sheet } => {
                             self.diff_state.status = "comparing".into();
-                            log::info!("开始同步Diff: old={} new={} sheet={}", old, new, sheet);
-                            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                                let r = crate::diff::start_background_diff(old, new, sheet);
-                                // Wait for the background thread to finish
-                                loop {
-                                    if let Ok(lock) = r.lock() {
-                                        if lock.is_some() { break; }
-                                    }
-                                    std::thread::sleep(std::time::Duration::from_millis(10));
-                                }
-                                r
-                            }));
-                            match result {
-                                Ok(shared) => {
-                                    self.diff_result = shared;
-                                    // Poll immediately
-                                    if let Ok(mut lock) = self.diff_result.lock() {
-                                        if let Some(result) = lock.take() {
-                                            self.diff_state.columns = result.columns;
-                                            self.diff_state.diff_rows = result.diff_rows;
-                                            if let Some(err) = result.error {
-                                                self.diff_state.status = format!("error:{err}");
-                                            } else {
-                                                self.diff_state.status = "done".into();
-                                            }
-                                        }
-                                    }
-                                }
-                                Err(panic_val) => {
-                                    let msg = if let Some(s) = panic_val.downcast_ref::<&str>() { s.to_string() }
-                                        else if let Some(s) = panic_val.downcast_ref::<String>() { s.clone() }
-                                        else { "未知panic".to_string() };
-                                    log::error!("diff崩溃: {msg}");
-                                    self.diff_state.status = format!("error:{msg}");
-                                }
-                            }
+                            self.diff_result = crate::diff::start_background_diff(old, new, sheet);
                         }
                     }
                 }
