@@ -1348,7 +1348,20 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                     match action {
                         crate::diff::DiffAction::Compare { old, new, sheet } => {
                             self.diff_state.status = "comparing".into();
-                            self.diff_result = crate::diff::start_background_diff(old, new, sheet);
+                            log::info!("开始后台Diff: old={} new={} sheet={}", old, new, sheet);
+                            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                crate::diff::start_background_diff(old, new, sheet)
+                            }));
+                            match result {
+                                Ok(shared) => self.diff_result = shared,
+                                Err(panic_val) => {
+                                    let msg = if let Some(s) = panic_val.downcast_ref::<&str>() { s.to_string() }
+                                        else if let Some(s) = panic_val.downcast_ref::<String>() { s.clone() }
+                                        else { "未知panic".to_string() };
+                                    log::error!("start_background_diff崩溃: {msg}");
+                                    self.diff_state.status = format!("error:{msg}");
+                                }
+                            }
                         }
                     }
                 }
