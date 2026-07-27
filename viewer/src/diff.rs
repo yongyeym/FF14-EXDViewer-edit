@@ -286,56 +286,40 @@ pub enum DiffAction {
 pub fn draw_diff_table(diff: &DiffState, ui: &mut egui::Ui) -> CellResponse {
     let rows = &diff.diff_rows;
     let cols = &diff.columns;
-    let row_height = ui.text_style_height(&egui::TextStyle::Button);
+    let data_col_start = if cols.len() > 1 && cols[1] == "Subrow" { 2 } else { 1 };
+    let header_names: Vec<&str> = cols.iter().skip(data_col_start).map(|s| s.as_str()).collect();
 
-    // Header
-    egui::Frame::default().fill(ui.style().visuals.faint_bg_color).show(ui, |ui| {
+    egui::ScrollArea::both().auto_shrink(false).id_salt("diff_body").show(ui, |ui| {
+        // Header: Diff, Row, then all data columns
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Row").strong());
-            ui.label(egui::RichText::new("Diff").strong());
-            for c in cols.iter().skip(1).take(8) {
-                ui.label(egui::RichText::new(c).strong().size(11.0));
+            ui.label(egui::RichText::new("Diff").strong().size(11.0));
+            ui.label(egui::RichText::new("Row").strong().size(11.0));
+            for name in &header_names {
+                ui.label(egui::RichText::new(*name).strong().size(11.0));
             }
-            if cols.len() > 9 { ui.label("…"); }
         });
-    });
-    ui.separator();
+        ui.separator();
 
-    // Virtualized data rows
-    let _id = egui::Id::new("diff_rows");
-    let total = rows.len();
-    let max_visible_cols = cols.len().min(10);
-
-    egui::ScrollArea::both().auto_shrink(false).show_rows(ui, row_height, total, |ui, range| {
-        for i in range {
-            let row = &rows[i];
-            let bg = match row.diff_type {
-                DiffType::Deleted => Color32::from_rgba_premultiplied(255, 200, 200, 30),
-                DiffType::Added => Color32::from_rgba_premultiplied(200, 255, 200, 30),
-            };
-
+        // All diff rows, no bg color, no truncation
+        for row in rows {
             ui.horizontal(|ui| {
-                let (_, resp) = ui.allocate_exact_size(egui::vec2(40.0, row_height), egui::Sense::click());
-                ui.painter().rect_filled(resp.rect, 0.0, bg);
-                ui.label(&row.row_key);
+                // Diff marker FIRST
                 let m = match row.diff_type {
                     DiffType::Deleted => egui::RichText::new("-").color(Color32::RED).strong(),
                     DiffType::Added => egui::RichText::new("+").color(Color32::GREEN).strong(),
                 };
                 ui.add(egui::Label::new(m).sense(egui::Sense::click()));
-                // Show first few cells
-                for cell in row.cells.iter().take(max_visible_cols.saturating_sub(2)) {
+                // Row key
+                ui.label(&row.row_key);
+                // ALL cell values
+                for cell in &row.cells {
                     ui.add(egui::Label::new(cell.as_str()).sense(egui::Sense::click()).wrap_mode(egui::TextWrapMode::Truncate));
-                }
-                if row.cells.len() > max_visible_cols.saturating_sub(2) {
-                    ui.label("…");
                 }
             });
         }
     });
     CellResponse::None
 }
-
 fn exe_export_data_dir() -> PathBuf {
     std::env::current_exe().ok()
         .and_then(|p| p.parent().map(|p| p.join("export").join("data")))
