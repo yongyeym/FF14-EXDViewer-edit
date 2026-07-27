@@ -906,12 +906,6 @@ impl App {
                     s.len()
                 }).unwrap_or(0)
             );
-            let sheets = if self.show_new_sheets_only && self.sheet_list_state.starts_with("ready") {
-                let set: std::collections::HashSet<&str> = self.sheet_new_items.iter().map(String::as_str).collect();
-                let filtered: Vec<(String, i32)> = sheets.iter().filter(|(name, _)| set.contains(name.as_str())).cloned().collect();
-                log::debug!("new-only filter: {} sheets in cache, {} matched", sheets.len(), filtered.len());
-                Rc::new(filtered)
-            } else { sheets };
             let sheets = match &pr_changed {
                 PrChangedState::Ready(changed) if PR_CHANGED_ONLY.get(ctx) => Rc::new(
                     sheets
@@ -926,6 +920,12 @@ impl App {
             egui::CentralPanel::default().show(ui, |ui| {
                 // Sort: favorited sheets first, then alphabetically
                 let mut sorted_sheets: Vec<(String, i32)> = sheets.to_vec();
+                if self.show_new_sheets_only && self.sheet_list_state.starts_with("ready") {
+                    let set: std::collections::HashSet<&str> = self.sheet_new_items.iter().map(String::as_str).collect();
+                    let before = sorted_sheets.len();
+                    sorted_sheets.retain(|(name, _)| set.contains(name.as_str()));
+                    log::debug!("new-only filter: {} → {} sheets (set has {} items)", before, sorted_sheets.len(), set.len());
+                }
                 sorted_sheets.sort_by(|a, b| {
                     let a_fav = self.favorites.contains(&a.0);
                     let b_fav = self.favorites.contains(&b.0);

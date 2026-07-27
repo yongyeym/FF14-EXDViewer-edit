@@ -113,7 +113,7 @@ fn compute_diff(
     old: &HashMap<String, (u64, Vec<String>)>,
     new: &HashMap<String, (u64, Vec<String>)>,
 ) -> Vec<DiffRow> {
-    let mut result = Vec::with_capacity(old.len().max(new.len()) / 10);
+    let mut result = Vec::new();
     let all: Vec<&String> = old.keys().chain(new.keys()).collect();
     let mut keys: Vec<&String> = Vec::with_capacity(all.len());
     for k in &all { if !keys.contains(k) { keys.push(k); } }
@@ -123,9 +123,14 @@ fn compute_diff(
         match (old.get(key), new.get(key)) {
             (Some(_), None) => result.push(DiffRow { row_key: key.clone(), diff_type: DiffType::Deleted, cells: vec![] }),
             (None, Some((_, cells))) => result.push(DiffRow { row_key: key.clone(), diff_type: DiffType::Added, cells: cells.clone() }),
-            (Some((oh, oc)), Some((nh, nc))) if oh != nh || oc != nc => {
-                result.push(DiffRow { row_key: key.clone(), diff_type: DiffType::Deleted, cells: oc.clone() });
-                result.push(DiffRow { row_key: key.clone(), diff_type: DiffType::Added, cells: nc.clone() });
+            (Some((_, oc)), Some((_, nc))) => {
+                // Compare only the common prefix (min length) to handle varying subrow counts
+                let common = oc.len().min(nc.len());
+                let cells_match = oc[..common] == nc[..common];
+                if !cells_match {
+                    result.push(DiffRow { row_key: key.clone(), diff_type: DiffType::Deleted, cells: oc.clone() });
+                    result.push(DiffRow { row_key: key.clone(), diff_type: DiffType::Added, cells: nc.clone() });
+                }
             }
             _ => {}
         }
@@ -253,24 +258,52 @@ pub enum DiffAction {
 pub fn draw_diff_table(diff: &DiffState, ui: &mut egui::Ui) -> CellResponse {
     let rows = &diff.diff_rows;
     let cols = &diff.columns;
-    egui::ScrollArea::horizontal().auto_shrink(false).show(ui, |ui| {
-        egui::Grid::new("diff_grid").striped(true).min_col_width(60.0).show(ui, |ui| {
-            ui.label("Row"); ui.label("Diff");
-            for c in cols.iter().skip(1) { ui.label(c); }
-            ui.end_row();
-            for row in rows {
-                let m = match row.diff_type {
-                    DiffType::Deleted => egui::RichText::new("-").color(Color32::RED),
-                    DiffType::Added => egui::RichText::new("+").color(Color32::GREEN),
-                };
+    let row_height = ui.text_style_height(&egui::TextStyle::Button);
+
+    // Header
+    egui::Frame::default().fill(ui.style().visuals.faint_bg_color).show(ui, |ui| {
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("Row").strong());
+            ui.label(egui::RichText::new("Diff").strong());
+            for c in cols.iter().skip(1).take(8) {
+                ui.label(egui::RichText::new(c).strong().size(11.0));
+            }
+            if cols.len() > 9 { ui.label("…"); }
+        });
+    });
+    ui.separator();
+
+    // Virtualized data rows
+    let _id = egui::Id::new("diff_rows");
+    let total = rows.len();
+    let max_visible_cols = cols.len().min(10);
+
+    egui::ScrollArea::both().auto_shrink(false).show_rows(ui, row_height, total, |ui, range| {
+        for i in range {
+            let row = &rows[i];
+            let bg = match row.diff_type {
+                DiffType::Deleted => Color32::from_rgba_premultiplied(255, 200, 200, 30),
+                DiffType::Added => Color32::from_rgba_premultiplied(200, 255, 200, 30),
+            };
+
+            ui.horizontal(|ui| {
+                let (_, resp) = ui.allocate_exact_size(egui::vec2(40.0, row_height), egui::Sense::click());
+                ui.painter().rect_filled(resp.rect, 0.0, bg);
                 ui.label(&row.row_key);
+                let m = match row.diff_type {
+                    DiffType::Deleted => egui::RichText::new("-").color(Color32::RED).strong(),
+                    DiffType::Added => egui::RichText::new("+").color(Color32::GREEN).strong(),
+                };
                 ui.add(egui::Label::new(m).sense(egui::Sense::click()));
-                for cell in &row.cells {
+                // Show first few cells
+                for cell in row.cells.iter().take(max_visible_cols.saturating_sub(2)) {
                     ui.add(egui::Label::new(cell.as_str()).sense(egui::Sense::click()).wrap_mode(egui::TextWrapMode::Truncate));
                 }
-                ui.end_row();
-            }
-        });
+                if row.cells.len() > max_visible_cols.saturating_sub(2) {
+                    ui.label("…");
+                }
+            });
+        }
     });
     CellResponse::None
 }

@@ -23,7 +23,7 @@ fn main() -> eframe::Result {
         egui_logger::builder().build(),
     )
     .init();
-    log::set_max_level(log::LevelFilter::Info);
+    log::set_max_level(log::LevelFilter::Debug);
 
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
