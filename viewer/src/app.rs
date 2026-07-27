@@ -881,9 +881,10 @@ impl App {
             let sheets = self
                 .sheet_filter_data
                 .get_or_insert((sheets_filter.clone(), misc_sheets_shown), || {
-                    let sheets = backend
-                        .excel()
-                        .get_entries()
+                    let entries = backend.excel().get_entries();
+                    let sample: Vec<&str> = entries.keys().take(3).map(String::as_str).collect();
+                    log::debug!("excel.get_entries() sample: {:?}", sample);
+                    let sheets = entries
                         .iter()
                         .filter(|(_, id)| misc_sheets_shown || **id >= 0)
                         .sorted_by_key(|(sheet, _)| *sheet)
@@ -913,20 +914,19 @@ impl App {
                 // Sort: favorited sheets first, then alphabetically
                 let mut sorted_sheets: Vec<(String, i32)> = sheets.to_vec();
                 if self.show_new_sheets_only && self.sheet_list_state.starts_with("ready") {
-                    // Debug: compare sample items
-                    let new_sample: Vec<&str> = self.sheet_new_items.iter().take(5).map(String::as_str).collect();
-                    let sheet_sample: Vec<&str> = sorted_sheets.iter().take(5).map(|(n,_)| n.as_str()).collect();
-                    log::debug!("new-items sample: {:?}", new_sample);
-                    log::debug!("sheets sample: {:?}", sheet_sample);
-                    // Check if any match
-                    let first_new = self.sheet_new_items.first();
-                    let match_found = first_new.map_or(false, |n| sorted_sheets.iter().any(|(s,_)| s == n));
-                    log::debug!("first new item matches any sheet: {}", match_found);
-                    let set: std::collections::HashSet<&str> = self.sheet_new_items.iter().map(String::as_str).collect();
-                    let before = sorted_sheets.len();
-                    sorted_sheets.retain(|(name, _)| set.contains(name.as_str()));
-                    if before != sorted_sheets.len() {
-                        log::debug!("new-only filter: {} → {} sheets", before, sorted_sheets.len());
+                    // Bypass cache: check directly against excel.get_entries()
+                    let actual_entries: std::collections::HashSet<String> = self.backend.as_ref()
+                        .map(|b| b.excel().get_entries().keys().cloned().collect())
+                        .unwrap_or_default();
+                    let filtered: Vec<String> = self.sheet_new_items.iter()
+                        .filter(|name| actual_entries.contains(*name))
+                        .cloned()
+                        .collect();
+                    log::debug!("new-only direct check: {} new items, {} valid in get_entries", 
+                        self.sheet_new_items.len(), filtered.len());
+                    sorted_sheets.retain(|(name, _)| filtered.contains(name));
+                    if sorted_sheets.len() != 1198 {
+                        log::debug!("new-only filter result: {} sheets", sorted_sheets.len());
                     }
                 }
                 sorted_sheets.sort_by(|a, b| {
