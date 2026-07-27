@@ -1353,7 +1353,7 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                                 let r = crate::diff::start_background_diff(old, new, sheet);
                                 // Wait for the background thread to finish
                                 loop {
-                                    if let Ok(mut lock) = r.lock() {
+                                    if let Ok(lock) = r.lock() {
                                         if lock.is_some() { break; }
                                     }
                                     std::thread::sleep(std::time::Duration::from_millis(10));
