@@ -2323,6 +2323,7 @@ name = "ff14-exdviewer-edit"
 version = "1.7.1"
 dependencies = [
  "anyhow",
+ "arboard",
  "async-trait",
  "base64 0.23.0",
  "binrw",

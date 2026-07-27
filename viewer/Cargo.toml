@@ -57,6 +57,7 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 image_dds = { version = "0.7", default-features = false, features = ["image"] }
 either = { version = "1", features = ["serde"] }
 replace_with = "0.1"
+arboard = "3"
 pinned = "0.1"
 matchit = "0.9"
 zip = { version = "8", default-features = false }

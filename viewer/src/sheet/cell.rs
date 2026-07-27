@@ -573,8 +573,26 @@ fn draw_icon(ctx: &GlobalContext, ui: &mut egui::Ui, icon_id: u32, sheet_name: &
         get_icon_path(icon_id, hires)
     ));
     resp.context_menu(|ui| {
-        if ui.button("复制").clicked() {
+        if ui.button("复制原始值").clicked() {
             ui.ctx().copy_text(icon_id.to_string());
+            ui.close();
+        }
+        if ui.button("复制图片").clicked() {
+            if let Some(png) = (*icon_mgr).get_png_bytes(icon_id, hires) {
+                use arboard::Clipboard;
+                if let Ok(mut cb) = Clipboard::new() {
+                    let img = image::load_from_memory(&png).ok();
+                    if let Some(img) = img {
+                        let rgba = img.to_rgba8();
+                        let (w, h) = rgba.dimensions();
+                        let _ = cb.set_image(arboard::ImageData {
+                            width: w as usize,
+                            height: h as usize,
+                            bytes: std::borrow::Cow::from(rgba.into_raw()),
+                        });
+                    }
+                }
+            }
             ui.close();
         }
         ui.separator();

@@ -36,6 +36,8 @@ pub struct IconManager(Arc<Mutex<IconManagerImpl>>);
 struct IconManagerImpl {
     cache: HashMap<IconEntry, ConvertibleIconPromise>,
     loaded_handles: Vec<TextureHandle>,
+    /// Cached PNG bytes for clipboard copy.
+    png_cache: HashMap<(u32, bool), Vec<u8>>,
 }
 
 impl IconManager {
@@ -45,6 +47,11 @@ impl IconManager {
 
     pub fn clear(&self) {
         self.0.lock().clear();
+    }
+
+    /// Get cached PNG bytes for an icon, if available.
+    pub fn get_png_bytes(&self, icon_id: u32, hires: bool) -> Option<Vec<u8>> {
+        self.0.lock().png_cache.get(&(icon_id, hires)).cloned()
     }
 
     // None = not loaded, Some(None) = loaded but failed/doesn't exist, Some(Some) = loaded successfully
@@ -69,6 +76,7 @@ impl IconManagerImpl {
     pub fn clear(&mut self) {
         self.loaded_handles.clear();
         self.cache.clear();
+        self.png_cache.clear();
     }
 
     fn convert_promise(
