@@ -350,8 +350,7 @@ impl egui_table::TableDelegate for DiffTableDelegate<'_> {
     fn header_cell_ui(&mut self, ui: &mut egui::Ui, cell: &egui_table::HeaderCellInfo) {
         let egui_table::HeaderCellInfo { col_range, .. } = cell;
 
-        let _is_row_col = col_range.start == 0;
-        let data_idx = if col_range.start == 1 { None } else { Some(col_range.start - 2) };
+        let data_idx = col_range.start.checked_sub(2);
 
         egui::Frame::NONE.inner_margin(egui::Margin::symmetric(4, 2)).show(ui, |ui| {
             if col_range.start == 0 {
