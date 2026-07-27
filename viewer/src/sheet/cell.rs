@@ -535,7 +535,7 @@ impl CellValue {
     }
 }
 
-fn draw_icon(ctx: &GlobalContext, ui: &mut egui::Ui, icon_id: u32, sheet_name: &str, col_name: &str) -> egui::Response {
+pub(crate) fn draw_icon(ctx: &GlobalContext, ui: &mut egui::Ui, icon_id: u32, sheet_name: &str, col_name: &str) -> egui::Response {
     let (excel, icon_mgr) = (ctx.backend().excel().clone(), &ctx.icon_manager());
     let hires = ALWAYS_HIRES.get(ui.ctx());
     let image_source = icon_mgr.get_or_insert_icon(icon_id, hires, ui.ctx(), move || {

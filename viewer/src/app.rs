@@ -1363,7 +1363,7 @@ impl App {
                     None
                 };
                 let resp = if let Some(ref ds) = diff_state_owned {
-                    crate::diff::draw_diff_table(ds, ui)
+                    crate::diff::draw_diff_table(ds, ui, table.context())
                 } else {
                     table.draw(ui, scroll_to)
                 };

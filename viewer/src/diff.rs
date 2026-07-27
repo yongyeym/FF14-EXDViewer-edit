@@ -283,35 +283,30 @@ pub enum DiffAction {
     Compare { old: String, new: String, sheet: String },
 }
 
-pub fn draw_diff_table(diff: &DiffState, ui: &mut egui::Ui) -> CellResponse {
+pub fn draw_diff_table(diff: &DiffState, ui: &mut egui::Ui, _context: &crate::sheet::TableContext) -> CellResponse {
     let rows = &diff.diff_rows;
     let cols = &diff.columns;
     let data_col_start = if cols.len() > 1 && cols[1] == "Subrow" { 2 } else { 1 };
-    let header_names: Vec<&str> = cols.iter().skip(data_col_start).map(|s| s.as_str()).collect();
 
-    egui::ScrollArea::both().auto_shrink(false).id_salt("diff_body").show(ui, |ui| {
-        // Header: Diff, Row, then all data columns
+    egui::ScrollArea::both().auto_shrink(false).id_salt("diff_full").show(ui, |ui| {
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new("Diff").strong().size(11.0));
             ui.label(egui::RichText::new("Row").strong().size(11.0));
-            for name in &header_names {
-                ui.label(egui::RichText::new(*name).strong().size(11.0));
+            for ci in data_col_start..cols.len() {
+                ui.label(egui::RichText::new(&cols[ci]).strong().size(11.0));
             }
         });
         ui.separator();
 
-        // All diff rows, no bg color, no truncation
         for row in rows {
             ui.horizontal(|ui| {
-                // Diff marker FIRST
                 let m = match row.diff_type {
                     DiffType::Deleted => egui::RichText::new("-").color(Color32::RED).strong(),
                     DiffType::Added => egui::RichText::new("+").color(Color32::GREEN).strong(),
                 };
                 ui.add(egui::Label::new(m).sense(egui::Sense::click()));
-                // Row key
                 ui.label(&row.row_key);
-                // ALL cell values
+
                 for cell in &row.cells {
                     ui.add(egui::Label::new(cell.as_str()).sense(egui::Sense::click()).wrap_mode(egui::TextWrapMode::Truncate));
                 }
