@@ -44,14 +44,23 @@ pub struct TableContextImpl {
     referenced_sheets: RefCell<HashMap<String, SharedConvertibleSheetPromise>>,
 
     filter_cache: FilterCache,
+    /// Pending icon save request: (icon_id, column_name, sheet_name, save_all)
+    pub icon_save_request: RefCell<Option<(u32, String, String, bool)>>,
 }
 
 impl TableContext {
     pub fn new(global: GlobalContext, sheet: BaseSheet, schema: Option<&Schema>) -> Self {
         let sheet_columns = SheetColumnDefinition::from_sheet(&sheet);
-        let (schema_columns, display_column_idx) = schema
+        let (mut schema_columns, display_column_idx) = schema
             .and_then(|s| SchemaColumn::from_schema(s).ok())
             .unwrap_or_else(|| (SchemaColumn::from_blank(sheet_columns.len()), None));
+
+        // Pad schema columns if the schema defines fewer columns than the sheet
+        // (some game sheets like SpecialShop have many repeated physical columns)
+        if schema_columns.len() < sheet_columns.len() {
+            let blanks = SchemaColumn::from_blank(sheet_columns.len() - schema_columns.len());
+            schema_columns.extend(blanks);
+        }
         let column_ordering = sheet_columns
             .iter()
             .enumerate()
@@ -70,11 +79,22 @@ impl TableContext {
             display_column_idx: std::cell::Cell::new(display_column_idx),
             referenced_sheets: RefCell::new(HashMap::new()),
             filter_cache,
+            icon_save_request: RefCell::new(None),
         }))
     }
 
     pub fn sheet(&self) -> &BaseSheet {
         &self.0.sheet
+    }
+
+    /// Take the pending icon save request, if any.
+    pub fn take_icon_save_request(&self) -> Option<(u32, String, String, bool)> {
+        self.0.icon_save_request.borrow_mut().take()
+    }
+
+    /// Set a pending icon save request.
+    pub fn set_icon_save_request(&self, request: (u32, String, String, bool)) {
+        self.0.icon_save_request.borrow_mut().replace(request);
     }
 
     pub fn global(&self) -> &GlobalContext {

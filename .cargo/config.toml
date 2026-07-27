@@ -16,3 +16,11 @@ rustflags = [
     '-C',
     'link-arg=-zstack-size=8388608',
 ]
+
+[target.x86_64-pc-windows-msvc]
+rustflags = [
+    "-C", "linker=C:/Users/StarYM/.rustup/toolchains/stable-x86_64-pc-windows-msvc/lib/rustlib/x86_64-pc-windows-msvc/bin/rust-lld.exe",
+    "-C", "link-arg=/LIBPATH:C:/Program Files (x86)/Windows Kits/10/Lib/10.0.22621.0/um/x64",
+    "-C", "link-arg=/LIBPATH:C:/Program Files (x86)/Windows Kits/10/Lib/10.0.22621.0/ucrt/x64",
+    "-C", "link-arg=/LIBPATH:C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/lib/x64",
+]

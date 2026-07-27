@@ -11,6 +11,7 @@ use egui::{
 };
 use egui_extras::install_image_loaders;
 use ironworks::excel::Language;
+use ironworks::file::File;
 use itertools::{EitherOrBoth, Itertools};
 use lru::LruCache;
 use matchit::Params;
@@ -19,10 +20,11 @@ use zip::{ZipWriter, write::SimpleFileOptions};
 use crate::{
     about,
     backend::Backend,
+    data::FileProviderExt,
     editable_schema::EditableSchema,
     excel::{
         base::BaseSheet,
-        provider::{ExcelHeader, ExcelProvider},
+        provider::{ExcelHeader, ExcelProvider, ExcelSheet},
     },
     github::CALLBACK_PATH,
     goto, music,
@@ -32,10 +34,10 @@ use crate::{
     settings::{
         ALWAYS_HIRES, BACKEND_CONFIG, BackendConfig, CODE_SYNTAX_THEME, COLOR_THEME,
         CURRENT_SHEET_LANGUAGES, DISPLAY_FIELD_SHOWN, EVALUATE_STRINGS, GithubSchemaBranch,
-        LANGUAGE, LOGGER_SHOWN, MISC_SHEETS_SHOWN, PR_CHANGED_ONLY, SCHEMA_EDITOR_VISIBLE,
-        SELECTED_SHEET, SHEET_FILTER_OPTIONS, SHEET_FILTERS, SHEETS_FILTER, SOLID_SCROLLBAR,
-        SORTED_BY_OFFSET, SchemaLocation, TEMP_HIGHLIGHTED_ROW, TEMP_SCROLL_TO, TEXT_MAX_LINES,
-        TEXT_USE_SCROLL, TEXT_WRAP_WIDTH,
+        ICON_SAVE_REQUEST, InstallLocation, LANGUAGE, LOGGER_SHOWN, MISC_SHEETS_SHOWN,
+        PR_CHANGED_ONLY, SCHEMA_EDITOR_VISIBLE, SELECTED_SHEET, SHEET_FILTER_OPTIONS,
+        SHEET_FILTERS, SHEETS_FILTER, SOLID_SCROLLBAR, SORTED_BY_OFFSET, SchemaLocation,
+        TEMP_HIGHLIGHTED_ROW, TEMP_SCROLL_TO, TEXT_MAX_LINES, TEXT_USE_SCROLL, TEXT_WRAP_WIDTH,
     },
     setup::{self, SetupWindow},
     sheet::{
@@ -44,8 +46,9 @@ use crate::{
     },
     shortcuts::{GOTO_ROW, GOTO_SHEET},
     utils::{
-        CodeTheme, CollapsibleSidePanel, ColorTheme, ConvertiblePromise, FuzzyMatcher, IconManager,
-        Side, TrackedPromise, opt_slider, shortcut, tick_promises,
+        CodeTheme, CollapsibleSidePanel, ColorTheme, ConvertiblePromise, FuzzyMatcher, GameVersion,
+        IconManager, PromiseKind, Side, TrackedPromise, UnsendPromise, opt_slider, shortcut,
+        tick_promises,
     },
 };
 
@@ -53,6 +56,16 @@ type CachedSheetEntry = (
     Language, // language
     String,   // sheet name
 );
+
+/// Actions that can be triggered from the export menu.
+enum ExportAction {
+    /// Export a single sheet. (TableContext, resolve_display_field)
+    Single(TableContext, bool),
+    /// Export all sheets. (resolve_display_field)
+    All(bool),
+    /// Export favorited sheets. (resolve_display_field)
+    Favorites(bool),
+}
 
 type CachedSheetPromise = TrackedPromise<Result<BaseSheet>>;
 type ConvertibleSheetPromise = ConvertiblePromise<CachedSheetPromise, Result<SheetTable>>;
@@ -148,6 +161,7 @@ pub struct App {
     icon_manager: IconManager,
     setup_window: Option<setup::SetupWindow>,
     backend: Option<Backend>,
+    favorites: std::collections::HashSet<String>,
     sheet_data: LruCache<CachedSheetEntry, ConvertibleSheetPromise>,
     schema_data: LruCache<CachedSchemaEntry, ConvertibleSchemaPromise>,
     sheet_languages: LruCache<String, ConvertibleLanguagesPromise>,
@@ -157,7 +171,7 @@ pub struct App {
     save_promise: Option<TrackedPromise<()>>,
     export_promise: Option<TrackedPromise<()>>,
     /// Promise for auto-initializing with saved config on restart, skipping setup page.
-    auto_init_promise: Option<TrackedPromise<anyhow::Result<(Backend, BackendConfig)>>>,
+    auto_init_promise: Option<UnsendPromise<anyhow::Result<(Backend, BackendConfig)>>>,
     pr_window: PrWindow,
     goto_window: Option<goto::GoToWindow>,
     about_open: bool,
@@ -457,21 +471,18 @@ impl App {
                             let mut use_scroll = TEXT_USE_SCROLL.get(ctx);
                             ui.with_layout(Layout::left_to_right(egui::Align::Center), |ui| {
                                 ui.style_mut().spacing.item_spacing.x /= 2.0;
-                                ui.set_max_width(
-                                    ui.spacing().slider_width + ui.spacing().interact_size.x,
-                                );
-                                ui.label("Show ");
+                                ui.label("文本过长时使用");
                                 if ui
                                     .selectable_label(
                                         use_scroll,
-                                        if use_scroll { "滚动条" } else { "气泡提示框" },
+                                        if use_scroll { " [滚动条] " } else { " [气泡提示框] " },
                                     )
                                     .clicked()
                                 {
                                     use_scroll = !use_scroll;
                                     TEXT_USE_SCROLL.set(ctx, use_scroll);
                                 }
-                                ui.label("文本过长时显示");
+                                ui.label("显示");
                             })
                         });
 
@@ -535,6 +546,84 @@ impl App {
                             }
                         }
                     });
+
+                    // Export menu in top bar
+                    if self.backend.is_some() {
+                        ui.menu_button("导出", |ui| {
+                            if ui.button("导出全部CSV").clicked() {
+                                let lang = LANGUAGE.get(ctx);
+                                if let Some(backend) = self.backend.clone() {
+                                    let version = BACKEND_CONFIG.get(ctx).and_then(|c| {
+                                        if let InstallLocation::Web(_, _, v) = &c.location {
+                                            v.clone()
+                                        } else {
+                                            None
+                                        }
+                                    });
+                                    self.command_export_all_csv(
+                                        backend, lang, true, version,
+                                    );
+                                }
+                                ui.close();
+                            }
+                            if ui.button("导出全部CSV源文件").clicked() {
+                                let lang = LANGUAGE.get(ctx);
+                                if let Some(backend) = self.backend.clone() {
+                                    let version = BACKEND_CONFIG.get(ctx).and_then(|c| {
+                                        if let InstallLocation::Web(_, _, v) = &c.location {
+                                            v.clone()
+                                        } else {
+                                            None
+                                        }
+                                    });
+                                    self.command_export_all_csv(
+                                        backend, lang, false, version,
+                                    );
+                                }
+                                ui.close();
+                            }
+                            ui.separator();
+                            if ui.button("导出收藏的CSV").clicked() {
+                                let lang = LANGUAGE.get(ctx);
+                                if let Some(backend) = self.backend.clone() {
+                                    let version = BACKEND_CONFIG.get(ctx).and_then(|c| {
+                                        if let InstallLocation::Web(_, _, v) = &c.location {
+                                            v.clone()
+                                        } else {
+                                            None
+                                        }
+                                    });
+                                    self.command_export_favorites_csv(
+                                        backend, lang, true, version,
+                                    );
+                                }
+                                ui.close();
+                            }
+                            if ui.button("导出收藏的CSV源文件").clicked() {
+                                let lang = LANGUAGE.get(ctx);
+                                if let Some(backend) = self.backend.clone() {
+                                    let version = BACKEND_CONFIG.get(ctx).and_then(|c| {
+                                        if let InstallLocation::Web(_, _, v) = &c.location {
+                                            v.clone()
+                                        } else {
+                                            None
+                                        }
+                                    });
+                                    self.command_export_favorites_csv(
+                                        backend, lang, false, version,
+                                    );
+                                }
+                                ui.close();
+                            }
+                            ui.separator();
+                            if ui.button("导出全部音乐").clicked() {
+                                if let Some(backend) = self.backend.clone() {
+                                    self.command_export_music(&backend, false);
+                                }
+                                ui.close();
+                            }
+                        });
+                    }
 
                     let seg = egui::vec2(72.0, ui.spacing().interact_size.y);
                     let switcher_w = 2.0 * seg.x + ui.spacing().item_spacing.x;
@@ -766,31 +855,61 @@ impl App {
             };
 
             egui::CentralPanel::default().show(ui, |ui| {
+                // Sort: favorited sheets first, then alphabetically
+                let mut sorted_sheets: Vec<(String, i32)> = sheets.to_vec();
+                sorted_sheets.sort_by(|a, b| {
+                    let a_fav = self.favorites.contains(&a.0);
+                    let b_fav = self.favorites.contains(&b.0);
+                    a_fav.cmp(&b_fav).reverse().then(a.0.cmp(&b.0))
+                });
+
                 let row_height = ui.text_style_height(&egui::TextStyle::Button);
                 ScrollArea::both().auto_shrink(false).show_rows(
                     ui,
                     row_height,
-                    sheets.len(),
+                    sorted_sheets.len(),
                     |ui, range| {
                         ui.with_layout(egui::Layout::top_down_justified(egui::Align::Min), |ui| {
                             let mut current_sheet = SELECTED_SHEET.get(ctx);
-                            for (sheet, id) in sheets
+                            for (sheet, id) in sorted_sheets
                                 .iter()
                                 .skip(range.start)
                                 .take(range.end - range.start)
                             {
                                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
-                                let resp = Button::selectable(
-                                    current_sheet.as_ref() == Some(sheet),
-                                    sheet.as_str(),
-                                )
-                                .ui(ui)
-                                .on_hover_text(format!("{sheet}\nId: {id}"));
-                                if resp.clicked() {
-                                    current_sheet = Some(sheet.clone());
-                                    SELECTED_SHEET.set(ctx, current_sheet.clone());
-                                    self.navigate(format!("/sheet/{}", sheet.clone()));
-                                }
+                                ui.horizontal(|ui| {
+                                    let is_fav = self.favorites.contains(sheet);
+                                    let star = if is_fav { "★ " } else { "☆ " };
+                                    let resp = ui
+                                        .add_sized(
+                                            egui::vec2(18.0, row_height),
+                                            egui::Label::new(
+                                                egui::RichText::new(star)
+                                                    .color(if is_fav {
+                                                        egui::Color32::from_rgb(0xFF, 0xCC, 0x00)
+                                                    } else {
+                                                        egui::Color32::GRAY
+                                                    }),
+                                            )
+                                            .sense(egui::Sense::click()),
+                                        )
+                                        .on_hover_cursor(egui::CursorIcon::Default)
+                                        .on_hover_text("点击切换收藏");
+                                    if resp.clicked() {
+                                        self.toggle_favorite(sheet);
+                                    }
+                                    let resp = Button::selectable(
+                                        current_sheet.as_ref() == Some(sheet),
+                                        sheet.as_str(),
+                                    )
+                                    .ui(ui)
+                                    .on_hover_text(format!("{sheet}\nId: {id}"));
+                                    if resp.clicked() {
+                                        current_sheet = Some(sheet.clone());
+                                        SELECTED_SHEET.set(ctx, current_sheet.clone());
+                                        self.navigate(format!("/sheet/{sheet}"));
+                                    }
+                                });
                             }
                         });
                     },
@@ -802,7 +921,7 @@ impl App {
     fn draw_sheet_data(&mut self, ui: &mut egui::Ui) {
         let ctx = &ui.ctx().clone();
         self.export_promise.take_if(|p| p.try_get().is_some());
-        let mut export_request = None;
+        let mut export_request: Option<ExportAction> = None;
 
         egui::CentralPanel::default()
             .frame(
@@ -1046,7 +1165,10 @@ impl App {
                                         .on_hover_text("链接导出为显示值")
                                         .clicked()
                                     {
-                                        export_request = Some((table.context().clone(), true));
+                                        export_request = Some(ExportAction::Single(
+                                            table.context().clone(),
+                                            true,
+                                        ));
                                         ui.close();
                                     }
                                     if ui
@@ -1054,7 +1176,28 @@ impl App {
                                         .on_hover_text("链接导出为原始值")
                                         .clicked()
                                     {
-                                        export_request = Some((table.context().clone(), false));
+                                        export_request = Some(ExportAction::Single(
+                                            table.context().clone(),
+                                            false,
+                                        ));
+                                        ui.close();
+                                    }
+                                    ui.separator();
+                                    if ui.button("导出全部CSV").clicked() {
+                                        export_request = Some(ExportAction::All(true));
+                                        ui.close();
+                                    }
+                                    if ui.button("导出全部CSV源文件").clicked() {
+                                        export_request = Some(ExportAction::All(false));
+                                        ui.close();
+                                    }
+                                    ui.separator();
+                                    if ui.button("导出收藏的CSV").clicked() {
+                                        export_request = Some(ExportAction::Favorites(true));
+                                        ui.close();
+                                    }
+                                    if ui.button("导出收藏的CSV源文件").clicked() {
+                                        export_request = Some(ExportAction::Favorites(false));
                                         ui.close();
                                     }
                                 });
@@ -1110,7 +1253,7 @@ impl App {
                 let resp = table.draw(ui, scroll_to);
                 match resp {
                     CellResponse::None => {}
-                    CellResponse::Icon(_) => {}
+                    CellResponse::Icon(..) => {}
                     CellResponse::Link((sheet_name, (row_id, subrow_id))) => {
                         self.navigate(format!(
                             "/sheet/{sheet_name}#R{row_id}{}",
@@ -1135,8 +1278,57 @@ impl App {
                 }
             });
 
-        if let Some((context, resolve_display_field)) = export_request {
-            self.command_export_csv(context, resolve_display_field);
+        if let Some(action) = export_request {
+            match action {
+                ExportAction::Single(context, resolve_display_field) => {
+                    self.command_export_csv(context, resolve_display_field);
+                }
+                ExportAction::All(resolve_display_field) => {
+                    let lang = LANGUAGE.get(ui.ctx());
+                    if let Some(backend) = self.backend.clone() {
+                        let version = BACKEND_CONFIG.get(ui.ctx()).and_then(|c| {
+                            if let InstallLocation::Web(_, _, v) = &c.location {
+                                v.clone()
+                            } else {
+                                None
+                            }
+                        });
+                        self.command_export_all_csv(
+                            backend,
+                            lang,
+                            resolve_display_field,
+                            version,
+                        );
+                    }
+                }
+                ExportAction::Favorites(resolve_display_field) => {
+                    let lang = LANGUAGE.get(ui.ctx());
+                    if let Some(backend) = self.backend.clone() {
+                        let version = BACKEND_CONFIG.get(ui.ctx()).and_then(|c| {
+                            if let InstallLocation::Web(_, _, v) = &c.location {
+                                v.clone()
+                            } else {
+                                None
+                            }
+                        });
+                        self.command_export_favorites_csv(
+                            backend,
+                            lang,
+                            resolve_display_field,
+                            version,
+                        );
+                    }
+                }
+            }
+        }
+
+        // Handle icon save requests from context menu
+        if let Some((icon_id, col_name, sheet_name, save_all)) = ICON_SAVE_REQUEST.take(ui.ctx()) {
+            if let Some(backend) = self.backend.clone() {
+                let hires = ALWAYS_HIRES.get(ui.ctx());
+                let lang = LANGUAGE.get(ui.ctx());
+                self.command_save_icon(backend, icon_id, &col_name, &sheet_name, save_all, hires, lang);
+            }
         }
     }
 
@@ -1146,37 +1338,51 @@ impl App {
         path: &Path,
         _params: &Params<'_, '_>,
     ) -> RouteResponse {
-        // If saved BACKEND_CONFIG exists from a previous session,
-        // auto-initialize directly and skip the setup page.
-        if let Some(Some(config)) = BACKEND_CONFIG.try_get(ui.ctx()) {
-            self.setup_window = None;
-            self.auto_init_promise = Some(TrackedPromise::spawn_local({
-                let config = config.clone();
-                async move {
-                    let backend = Backend::new(config.clone()).await?;
-                    Ok((backend, config))
-                }
-            }));
+        // If backend doesn't exist yet AND saved config exists, auto-initialize
+        if self.backend.is_none() {
+            // Try loading from settings.json first (more readable config file)
+            let config = crate::config_file::load_backend_config()
+                .or_else(|| BACKEND_CONFIG.try_get(ui.ctx()).flatten());
+            if let Some(config) = config {
+                self.setup_window = None;
+                self.auto_init_promise = Some(UnsendPromise::new({
+                    let config = config.clone();
+                    async move {
+                        let backend = Backend::new(config.clone()).await?;
+                        Ok((backend, config))
+                    }
+                }));
+                RouteResponse::Title("设置".to_string())
+            } else {
+                self.setup_window = Some(SetupWindow::from_blank(
+                    path.query_pairs().contains_key("redirect"),
+                ));
+                RouteResponse::Title("设置".to_string())
+            }
         } else {
-            self.setup_window = Some(SetupWindow::from_blank(
+            // Already have a backend: show setup page for reconfiguration
+            self.setup_window = Some(SetupWindow::from_config(
+                ui.ctx(),
                 path.query_pairs().contains_key("redirect"),
             ));
+            RouteResponse::Title("设置".to_string())
         }
-        RouteResponse::Title("Setup".to_string())
     }
 
     fn draw_setup(&mut self, ui: &mut egui::Ui, path: &Path, _params: &Params<'_, '_>) {
         // Check if auto-init is running (from saved config on restart)
-        if let Some(promise) = &mut self.auto_init_promise {
-            if let Some(result) = promise.try_get() {
-                match result {
+        if let Some(promise) = self.auto_init_promise.take() {
+            if promise.ready() {
+                match promise.block_and_take() {
                     Ok((backend, config)) => {
                         self.backend = Some(backend.clone());
+                        self.load_favorites();
                         self.sheet_data.clear();
                         self.schema_data.clear();
                         self.sheet_languages.clear();
                         CURRENT_SHEET_LANGUAGES.remove(ui.ctx());
                         BACKEND_CONFIG.set(ui.ctx(), Some(config.clone()));
+                        crate::config_file::save_backend_config(&config);
                         self.auto_init_promise = None;
                         self.navigate("/sheet");
                     }
@@ -1187,13 +1393,14 @@ impl App {
                     }
                 }
             } else {
-                // Still loading - show brief loading indicator
+                // Still loading - put the promise back for next frame
+                self.auto_init_promise = Some(promise);
                 egui::CentralPanel::default().show(ui, |ui| {
                     ui.vertical_centered(|ui| {
                         ui.add_space(100.0);
                         ui.heading("FF14 EXDViewer edit");
                         ui.add_space(10.0);
-                        ui.label("Loading saved configuration...");
+                        ui.label("正在加载保存的配置...");
                     });
                 });
             }
@@ -1202,12 +1409,17 @@ impl App {
 
         if let Some(Some((backend, config))) = self.setup_window.as_mut().map(|w| w.draw(ui.ctx())) {
             self.backend = Some(backend);
+            self.load_favorites();
             self.sheet_data.clear();
             self.schema_data.clear();
             self.sheet_languages.clear();
             CURRENT_SHEET_LANGUAGES.remove(ui.ctx());
 
             BACKEND_CONFIG.set(ui.ctx(), Some(config));
+
+            crate::config_file::save_backend_config(
+                &BACKEND_CONFIG.get(ui.ctx()).unwrap(),
+            );
             if let Some(redirect_path) = path.query_pairs().get("redirect").map(|s| s.as_str()) {
                 self.navigate_replace(redirect_path);
             } else {
@@ -1342,9 +1554,19 @@ impl App {
 
     fn draw_music(&mut self, ui: &mut egui::Ui, _path: &Path, _params: &Params<'_, '_>) {
         if let Some(backend) = self.backend.clone()
-            && let Some(row_id) = self.music.ui(ui, &backend)
+            && let Some(event) = self.music.ui(ui, &backend)
         {
-            self.navigate(format!("/music/{row_id}"));
+            match event {
+                music::MusicEvent::Select(row_id) => {
+                    self.navigate(format!("/music/{row_id}"));
+                }
+                music::MusicEvent::ExportCurrent => {
+                    self.command_export_music(&backend, true);
+                }
+                music::MusicEvent::ExportAll => {
+                    self.command_export_music(&backend, false);
+                }
+            }
         }
     }
 
@@ -1386,8 +1608,130 @@ impl App {
             .collect()
     }
 
+    // ── Favorites system ──────────────────────────────────────────
+
+    fn favorites_path() -> std::path::PathBuf {
+        std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|p| p.join("config").join("favorites.json")))
+            .unwrap_or_else(|| std::path::PathBuf::from("config/favorites.json"))
+    }
+
+    fn load_favorites(&mut self) {
+        let path = Self::favorites_path();
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if let Ok(names) = serde_json::from_str::<Vec<String>>(&content) {
+                self.favorites = names.into_iter().collect();
+                log::info!("已加载 {} 个收藏数据表", self.favorites.len());
+            }
+        }
+    }
+
+    fn save_favorites(&self) {
+        let path = Self::favorites_path();
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let names: Vec<&String> = self.favorites.iter().collect();
+        if let Ok(content) = serde_json::to_string_pretty(&names) {
+            let _ = std::fs::write(&path, &content);
+        }
+    }
+
+    fn toggle_favorite(&mut self, sheet_name: &str) {
+        if self.favorites.contains(sheet_name) {
+            self.favorites.remove(sheet_name);
+        } else {
+            self.favorites.insert(sheet_name.to_string());
+        }
+        self.save_favorites();
+    }
+
+    fn command_export_favorites_csv(
+        &mut self,
+        backend: Backend,
+        lang: Language,
+        resolve_display_field: bool,
+        version: Option<GameVersion>,
+    ) {
+        let export_base = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|p| p.join("export").join("data")))
+            .unwrap_or_else(|| std::path::PathBuf::from("export/data"));
+
+        let version_dir_name = version
+            .as_ref()
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "local".to_string());
+        let export_dir = if resolve_display_field {
+            export_base.join(&version_dir_name).join("favorites")
+        } else {
+            export_base
+                .join(&version_dir_name)
+                .join("favorites")
+                .join("raw")
+        };
+        let _ = std::fs::create_dir_all(&export_dir);
+
+        let favorite_names: Vec<String> = self.favorites.iter().cloned().collect();
+        let total = favorite_names.len();
+        if total == 0 {
+            log::info!("没有收藏的数据表");
+            return;
+        }
+        let excel = backend.excel().clone();
+
+        self.export_promise = Some(TrackedPromise::spawn_local(async move {
+            for (i, sheet_name) in favorite_names.iter().enumerate() {
+                let file_name = format!("{}.csv", sheet_name.replace('/', "_"));
+                let out_path = export_dir.join(&file_name);
+
+                match excel.get_sheet(sheet_name, lang).await {
+                    Ok(sheet) => {
+                        let editable = crate::config_file::load_schema_for_export(
+                            &backend,
+                            &sheet_name,
+                        ).await;
+                        let schema = editable.as_ref().and_then(|e| e.get_schema());
+                        let context = TableContext::new(
+                            crate::sheet::GlobalContext::new(
+                                egui::Context::default(),
+                                backend.clone(),
+                                lang,
+                                IconManager::new(),
+                            ),
+                            sheet,
+                            schema,
+                        );
+                        match export_csv(context, resolve_display_field).await {
+                            Ok(data) => {
+                                if let Err(e) = std::fs::write(&out_path, &data) {
+                                    log::error!("导出收藏 {sheet_name} 失败: {e}");
+                                } else {
+                                    log::info!(
+                                        "已导出 ({}): {}",
+                                        i + 1,
+                                        out_path.display()
+                                    );
+                                }
+                            }
+                            Err(e) => log::error!("生成CSV收藏 {sheet_name} 失败: {e}"),
+                        }
+                    }
+                    Err(e) => log::error!("读取收藏数据表 {sheet_name} 失败: {e}"),
+                }
+            }
+            log::info!("收藏CSV导出完成，共 {total} 张数据表");
+        }));
+    }
+
     fn command_export_csv(&mut self, context: TableContext, resolve_display_field: bool) {
         let file_name = format!("{}.csv", context.sheet().name().replace('/', "_"));
+        let export_dir = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|p| p.join("export").join("data")))
+            .unwrap_or_else(|| std::path::PathBuf::from("export/data"));
+        let _ = std::fs::create_dir_all(&export_dir);
 
         self.export_promise = Some(TrackedPromise::spawn_local(async move {
             let data = match export_csv(context, resolve_display_field).await {
@@ -1400,6 +1744,7 @@ impl App {
 
             if let Some(file) = rfd::AsyncFileDialog::new()
                 .set_title("导出CSV")
+                .set_directory(&export_dir)
                 .set_file_name(file_name)
                 .save_file()
                 .await
@@ -1410,6 +1755,283 @@ impl App {
                     log::info!("CSV导出成功");
                 }
             }
+        }));
+    }
+
+    fn command_save_icon(
+        &mut self,
+        backend: Backend,
+        icon_id: u32,
+        col_name: &str,
+        sheet_name: &str,
+        save_all: bool,
+        hires: bool,
+        lang: Language,
+    ) {
+        let export_dir = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|p| p.join("export").join("img")))
+            .unwrap_or_else(|| std::path::PathBuf::from("export/img"));
+        let _ = std::fs::create_dir_all(&export_dir);
+
+        let excel = backend.excel().clone();
+        let col_name = col_name.to_string();
+        let safe_col = col_name.replace(|c: char| !c.is_alphanumeric() && c != '-' && c != '_', "_");
+        let sheet_name = sheet_name.to_string();
+
+        self.export_promise = Some(TrackedPromise::spawn_local(async move {
+            if save_all {
+                // Save all icons from the entire sheet
+                match excel.get_sheet(&sheet_name, lang).await {
+                    Ok(sheet) => {
+                        let col_count = sheet.columns().len();
+                        let row_ids: Vec<u32> = sheet.get_row_ids().collect();
+                        let total = row_ids.len();
+                        log::info!("开始批量导出 {sheet_name} 的图标，共 {total} 行");
+                        for (ri, row_id) in row_ids.iter().enumerate() {
+                            let Ok(row) = sheet.get_row(*row_id) else { continue };
+                            use ironworks::file::exh::ColumnKind;
+                            for ci in 0..col_count {
+                                let col = &sheet.columns()[ci];
+                                if col.kind() != ColumnKind::Int32 { continue; }
+                                let val: i32 = crate::sheet::cell::read_integer(
+                                    row, col.offset() as u32, col.kind(),
+                                ).unwrap_or(0);
+                                if val <= 0 || val > u32::MAX as i32 { continue; }
+                                let id = val as u32;
+                                crate::utils::yield_to_ui().await;
+                                match excel.get_icon(id, hires).await {
+                                    Ok(either::Either::Right(img)) => {
+                                        let mut buf = std::io::Cursor::new(Vec::new());
+                                        if img.write_to(&mut buf, image::ImageFormat::Png).is_ok() {
+                                            let fname = format!("{sheet_name}-col{ci}-{id}.png");
+                                            let _ = std::fs::write(export_dir.join(&fname), buf.into_inner());
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            if ri % 50 == 0 { crate::utils::yield_to_ui().await; }
+                        }
+                        log::info!("图标批量导出完成: {sheet_name}");
+                    }
+                    Err(e) => log::error!("读取数据表 {sheet_name} 失败: {e}"),
+                }
+                return;
+            }
+
+            // Single icon save
+            match excel.get_icon(icon_id, hires).await {
+                Ok(either) => {
+                    match either {
+                        either::Either::Left(url) => {
+                            log::warn!("图标来自URL，暂不支持保存: {url}");
+                            return;
+                        }
+                        either::Either::Right(image) => {
+                            let mut buf = std::io::Cursor::new(Vec::new());
+                            if image.write_to(&mut buf, image::ImageFormat::Png).is_err() {
+                                log::error!("编码PNG失败");
+                                return;
+                            }
+                            let bytes = buf.into_inner();
+
+                            // Single save: show file dialog
+                            let default_name = if !col_name.is_empty() {
+                                format!("{sheet_name}-{safe_col}-{icon_id}.png")
+                            } else {
+                                format!("{sheet_name}-{icon_id}.png")
+                            };
+                            if let Some(file) = rfd::AsyncFileDialog::new()
+                                    .set_title("保存图片")
+                                    .set_directory(&export_dir)
+                                    .set_file_name(&default_name)
+                                    .save_file()
+                                    .await
+                                {
+                                    if let Err(e) = file.write(&bytes).await {
+                                        log::error!("保存图标失败: {e}");
+                                    } else {
+                                        log::info!("图标已保存: {}", file.file_name());
+                                    }
+                                }
+                        }
+                    }
+                }
+                Err(e) => log::error!("读取图标 {icon_id} 失败: {e}"),
+            }
+        }));
+    }
+
+    fn command_export_music(&mut self, backend: &Backend, export_current: bool) {
+        use ironworks::file::scd::{Codec, SoundContainer};
+        use std::io::Cursor;
+
+        let export_dir = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|p| p.join("export").join("music")))
+            .unwrap_or_else(|| std::path::PathBuf::from("export/music"));
+        let _ = std::fs::create_dir_all(&export_dir);
+
+        let files = backend.files().clone();
+
+        // Extract data before spawning async (avoid borrowing self in the future)
+        let tracks_for_export: Vec<(u32, String)> = if export_current {
+            self.music
+                .now_playing
+                .as_ref()
+                .map(|n| vec![(n.row_id, n.path.clone())])
+                .unwrap_or_default()
+        } else {
+            self.music
+                .rows
+                .iter()
+                .filter(|row| row.available)
+                .map(|row| (row.row_id, row.path.clone()))
+                .collect()
+        };
+
+        self.export_promise = Some(TrackedPromise::spawn_local(async move {
+            let total = tracks_for_export.len();
+            for (i, (_, track_path)) in tracks_for_export.iter().enumerate() {
+                // Yield to keep UI responsive during batch export
+                crate::utils::yield_to_ui().await;
+                let stem = std::path::Path::new(&track_path)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("unknown");
+
+                // Read SCD file and extract the actual audio data with correct extension
+                let result = async {
+                    let raw_bytes = files.file::<Vec<u8>>(track_path).await?;
+                    let container = SoundContainer::read(Cursor::new(raw_bytes))?;
+                    let entry = container
+                        .sound(0)
+                        .ok_or_else(|| anyhow::anyhow!("no audio entry in SCD"))?;
+                    let ext = match entry.format() {
+                        Codec::OggVorbis => "ogg",
+                        Codec::Hca => "hca",
+                        Codec::Mp3 => "mp3",
+                        Codec::MsAdpcm => "wav",
+                        Codec::Atrac9 => "at9",
+                        Codec::Pcm => "wav",
+                        Codec::Empty | Codec::Unknown(_) => "bin",
+                    };
+                    let file_name = format!("{stem}.{ext}");
+                    anyhow::Ok((file_name, entry.data().to_vec()))
+                }
+                .await;
+
+                match result {
+                    Ok((file_name, audio_data)) => {
+                        if total == 1 {
+                            // Single track: use file save dialog
+                            if let Some(file) = rfd::AsyncFileDialog::new()
+                                .set_title("导出音频")
+                                .set_directory(&export_dir)
+                                .set_file_name(file_name)
+                                .save_file()
+                                .await
+                            {
+                                if let Err(e) = file.write(&audio_data).await {
+                                    log::error!("导出音频 {stem} 失败: {e}");
+                                } else {
+                                    log::info!("音频导出成功: {stem}");
+                                }
+                            }
+                        } else {
+                            // Batch export: write directly to export directory
+                            let out_path = export_dir.join(&file_name);
+                            if let Err(e) = std::fs::write(&out_path, &audio_data) {
+                                log::error!("导出音频 {stem} 失败: {e}");
+                            } else {
+                                log::info!("已导出 ({}/{total}): {}", i + 1, out_path.display());
+                            }
+                        }
+                    }
+                    Err(e) => log::error!("读取音频 {track_path} 失败: {e}"),
+                }
+            }
+            if total > 1 {
+                log::info!("音乐导出完成，共 {total} 首");
+            }
+        }));
+    }
+
+    fn command_export_all_csv(
+        &mut self,
+        backend: Backend,
+        lang: Language,
+        resolve_display_field: bool,
+        version: Option<GameVersion>,
+    ) {
+        let export_base = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|p| p.join("export").join("data")))
+            .unwrap_or_else(|| std::path::PathBuf::from("export/data"));
+
+        let version_dir_name = version
+            .as_ref()
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "local".to_string());
+        let export_dir = if resolve_display_field {
+            export_base.join(&version_dir_name)
+        } else {
+            export_base.join(&version_dir_name).join("raw")
+        };
+        let _ = std::fs::create_dir_all(&export_dir);
+
+        let sheets: Vec<String> = backend
+            .excel()
+            .get_entries()
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect();
+        let total = sheets.len();
+        let excel = backend.excel().clone();
+
+        self.export_promise = Some(TrackedPromise::spawn_local(async move {
+            for (i, sheet_name) in sheets.iter().enumerate() {
+                let file_name = format!("{}.csv", sheet_name.replace('/', "_"));
+                let out_path = export_dir.join(&file_name);
+
+                match excel.get_sheet(sheet_name, lang).await {
+                    Ok(sheet) => {
+                        let editable =
+                            crate::editable_schema::EditableSchema::from_miscellaneous(
+                            sheet_name,
+                        )
+                            .ok();
+                        let schema = editable.as_ref().and_then(|e| e.get_schema());
+                        let context = TableContext::new(
+                            crate::sheet::GlobalContext::new(
+                                egui::Context::default(),
+                                backend.clone(),
+                                lang,
+                                IconManager::new(),
+                            ),
+                            sheet,
+                            schema,
+                        );
+                        match export_csv(context, resolve_display_field).await {
+                            Ok(data) => {
+                                if let Err(e) = std::fs::write(&out_path, &data) {
+                                    log::error!("导出 {sheet_name} 失败: {e}");
+                                } else {
+                                    log::info!(
+                                        "已导出 ({}/{total}): {}",
+                                        i + 1,
+                                        out_path.display()
+                                    );
+                                }
+                            }
+                            Err(e) => log::error!("生成CSV {sheet_name} 失败: {e}"),
+                        }
+                    }
+                    Err(e) => log::error!("读取数据表 {sheet_name} 失败: {e}"),
+                }
+            }
+            log::info!("全部CSV导出完成，共 {total} 张数据表");
         }));
     }
 
@@ -1484,6 +2106,7 @@ impl App {
             icon_manager: IconManager::new(),
             setup_window: None,
             backend: None,
+            favorites: std::collections::HashSet::new(),
             sheet_data: LruCache::new(NonZero::new(32).unwrap()),
             schema_data: LruCache::unbounded(),
             sheet_languages: LruCache::unbounded(),
@@ -1581,6 +2204,10 @@ impl App {
     }
 
     fn setup_theme(ctx: &egui::Context) {
+        // First launch: use Macchiato as default color theme
+        if COLOR_THEME.try_get(ctx).is_none() {
+            COLOR_THEME.set(ctx, ColorTheme::Macchiato);
+        }
         COLOR_THEME.get(ctx).apply(ctx);
         let solid_scrollbar = SOLID_SCROLLBAR.get(ctx);
         ctx.all_styles_mut(|s| {
@@ -1615,7 +2242,7 @@ impl eframe::App for App {
 fn add_links(ui: &mut egui::Ui, open_about: &mut bool) {
     ui.with_layout(Layout::right_to_left(ui.layout().vertical_align()), |ui| {
         if ui
-            .link(format!("EXDViewer v{}", crate::build::PKG_VERSION))
+            .link(format!("FF14 EXDViewer edit v{}", crate::build::PKG_VERSION))
             .clicked()
         {
             *open_about = true;

@@ -43,7 +43,11 @@ pub async fn export_csv(
 
     let has_subrows = context.sheet().has_subrows();
 
-    let mut writer = csv::Writer::from_writer(Vec::new());
+    // Write UTF-8 BOM so Excel recognises the encoding
+    // We write BOM bytes first, then create the CSV writer on top
+    let mut raw = Vec::new();
+    raw.extend_from_slice(&[0xEF, 0xBB, 0xBF]);
+    let mut writer = csv::Writer::from_writer(raw);
     let mut header = Vec::with_capacity(columns.len() + 2);
     header.push("Row");
     if has_subrows {

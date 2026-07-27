@@ -25,6 +25,7 @@ mod about;
 mod app;
 pub mod audio;
 mod backend;
+pub mod config_file;
 mod data;
 mod editable_schema;
 mod excel;

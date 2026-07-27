@@ -17,7 +17,7 @@ use web_time::{Duration, Instant};
 
 use crate::{
     excel::provider::{ExcelHeader, ExcelProvider, ExcelRow, ExcelSheet},
-    settings::{SHEET_FILTER_OPTIONS, SHEET_FILTERS, SORTED_BY_OFFSET, TEMP_HIGHLIGHTED_ROW},
+    settings::{ICON_SAVE_REQUEST, SHEET_FILTER_OPTIONS, SHEET_FILTERS, SORTED_BY_OFFSET, TEMP_HIGHLIGHTED_ROW},
     sheet::{
         ComplexFilter, FilterInput, FilterInputType, filter::CompiledFilterInput,
         should_ignore_clicks,
@@ -57,7 +57,8 @@ pub struct SheetTable {
     row_sizes: Vec<f32>,
 
     modal_image: Option<u32>,
-
+    modal_column_name: Option<String>,
+    /// Cache of text-wrap estimates keyed by rendered width.
     clicked_cell: Option<CellResponse>,
 
     filtered_rows: RefCell<LruCache<CompiledFilterInput, FilterValue>>,
@@ -94,6 +95,7 @@ impl SheetTable {
             subrow_lookup,
             row_sizes: Vec::new(),
             modal_image: None,
+            modal_column_name: None,
             clicked_cell: None,
             filtered_rows,
             unfiltered_row_offsets,
@@ -174,30 +176,53 @@ impl SheetTable {
                             async move { excel.get_icon(icon_id, true).await },
                         )
                     });
-                    match resp {
-                        ManagedIcon::Loaded(icon) => {
-                            ui.add(egui::Image::new(icon).fit_to_exact_size(ui.available_size()))
+                    ui.vertical(|ui| {
+                        match resp {
+                            ManagedIcon::Loaded(icon) => {
+                                ui.add(
+                                    egui::Image::new(icon)
+                                        .fit_to_exact_size(ui.available_size()),
+                                );
+                            }
+                            ManagedIcon::Failed(e) => {
+                                ui.label("Failed to load icon").on_hover_text(e.to_string());
+                            }
+                            ManagedIcon::Loading => {
+                                let (rect, _) =
+                                    ui.allocate_exact_size(ui.available_size(), egui::Sense::hover());
+                                ui.scope_builder(
+                                    UiBuilder::new()
+                                        .max_rect(rect)
+                                        .layout(Layout::centered_and_justified(ui.layout().main_dir())),
+                                    |ui| {
+                                        ui.add(Spinner::new().size(
+                                            ui.text_style_height(&egui::TextStyle::Heading) * 3.0,
+                                        ))
+                                    },
+                                )
+                                .inner;
+                            }
+                            ManagedIcon::NotLoaded => {
+                                ui.label("Icon not loaded");
+                            }
                         }
-                        ManagedIcon::Failed(e) => {
-                            ui.label("Failed to load icon").on_hover_text(e.to_string())
-                        }
-                        ManagedIcon::Loading => {
-                            let (rect, _) =
-                                ui.allocate_exact_size(ui.available_size(), egui::Sense::hover());
-                            ui.scope_builder(
-                                UiBuilder::new()
-                                    .max_rect(rect)
-                                    .layout(Layout::centered_and_justified(ui.layout().main_dir())),
-                                |ui| {
-                                    ui.add(Spinner::new().size(
-                                        ui.text_style_height(&egui::TextStyle::Heading) * 3.0,
-                                    ))
-                                },
-                            )
-                            .inner
-                        }
-                        ManagedIcon::NotLoaded => ui.label("Icon not loaded"),
-                    }
+                        ui.separator();
+                        ui.horizontal(|ui| {
+                            ui.label(format!("Id: {icon_id}"));
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui.button("保存此图片").clicked() {
+                                    let sheet_name = self.context.sheet().name();
+                                    let col_name = self.modal_column_name.clone().unwrap_or_default();
+                                    ICON_SAVE_REQUEST.set(ui.ctx(), (
+                                        icon_id,
+                                        col_name,
+                                        sheet_name.to_string(),
+                                        false,
+                                    ));
+                                }
+                            });
+                        });
+                    })
                 });
             if resp.should_close() {
                 self.modal_image = None;
@@ -736,8 +761,9 @@ impl TableDelegate for SheetTable {
 
         match resp {
             CellResponse::None => {}
-            CellResponse::Icon(icon_id) => {
+            CellResponse::Icon(icon_id, ref col_name) => {
                 self.modal_image = Some(icon_id);
+                self.modal_column_name = col_name.clone();
             }
             CellResponse::Link(_) | CellResponse::Row(_) => {}
         }

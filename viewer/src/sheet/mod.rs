@@ -1,4 +1,4 @@
-mod cell;
+pub mod cell;
 mod cell_iter;
 mod compact_sestring;
 mod csv;
@@ -109,7 +109,7 @@ fn string_label_wrapped(ui: &mut egui::Ui, value: &SeStr) -> Response {
             ui.ctx().copy_text(BASE64_STANDARD.encode(value.as_bytes()));
             ui.close();
         }
-        if ui.button("Copy Raw (hex)").clicked() {
+        if ui.button("复制原始值(hex)").clicked() {
             ui.ctx().copy_text(
                 value
                     .as_bytes()

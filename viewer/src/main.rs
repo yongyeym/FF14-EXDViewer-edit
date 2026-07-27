@@ -13,7 +13,7 @@ mod combined_log;
 mod shortcuts;
 
 use combined_log::CombinedLogger;
-use viewer::App;
+use ff14_exdviewer_edit::App;
 
 // When compiling natively:
 #[cfg(not(target_arch = "wasm32"))]
@@ -27,18 +27,47 @@ fn main() -> eframe::Result {
 
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([400.0, 300.0])
-            .with_min_inner_size([300.0, 220.0])
+            .with_inner_size([1920.0, 1080.0])
+            .with_min_inner_size([1024.0, 768.0])
             .with_icon(
                 eframe::icon_data::from_png_bytes(&include_bytes!("../assets/icon.png")[..])
                     .expect("Failed to load icon"),
             ),
-        persistence_path: Some(
-            std::env::current_exe()
-                .ok()
-                .and_then(|p| p.parent().map(|p| p.join("config")))
-                .unwrap_or_else(|| std::path::PathBuf::from("config")),
-        ),
+        persistence_path: {
+            let exe_path = std::env::current_exe().ok();
+            let exe_parent = exe_path.as_ref().and_then(|p| p.parent());
+            let ron_path = exe_parent
+                .map(|p| p.join("config").join("app.ron"))
+                .unwrap_or_else(|| std::path::PathBuf::from("config/app.ron"));
+
+            log::info!("Settings file: {}", ron_path.display());
+
+            // Clean up: if a stale file named "config" exists at exe dir, remove it
+            if let Some(parent) = ron_path.parent() {
+                let stale = parent.join("config");
+                if stale.is_file() {
+                    log::warn!("Removing stale config file: {}", stale.display());
+                    let _ = std::fs::remove_file(&stale);
+                }
+            }
+
+            // Ensure parent directory exists
+            if let Some(parent) = ron_path.parent() {
+                if let Err(e) = std::fs::create_dir_all(parent) {
+                    log::error!("Failed to create config dir '{}': {e}", parent.display());
+                }
+            }
+
+            // Also pre-create export subdirectories alongside exe
+            if let Some(parent) = exe_parent {
+                for sub in &["export/data", "export/music", "export/img"] {
+                    let sub_path = parent.join(sub);
+                    let _ = std::fs::create_dir_all(&sub_path);
+                }
+            }
+
+            Some(ron_path)
+        },
         ..Default::default()
     };
     eframe::run_native(

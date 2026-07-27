@@ -65,7 +65,7 @@ enum Songs {
 }
 
 #[derive(Clone, Copy)]
-struct StreamInfo {
+pub struct StreamInfo {
     codec: Codec,
     file_size: usize,
     stream_size: usize,
@@ -92,21 +92,21 @@ impl Loading {
     }
 }
 
-struct NowPlaying {
-    name: String,
-    path: String,
-    row_id: u32,
-    channels: u16,
-    sample_rate: u32,
-    loop_range_secs: Option<(f64, f64)>,
-    info: StreamInfo,
+pub struct NowPlaying {
+    pub name: String,
+    pub path: String,
+    pub row_id: u32,
+    pub channels: u16,
+    pub sample_rate: u32,
+    pub loop_range_secs: Option<(f64, f64)>,
+    pub info: StreamInfo,
 }
 
-struct TrackRow {
-    row_id: u32,
-    path: String,
-    name: String,
-    available: bool,
+pub struct TrackRow {
+    pub row_id: u32,
+    pub path: String,
+    pub name: String,
+    pub available: bool,
 }
 
 pub struct MusicPlayer {
@@ -117,13 +117,13 @@ pub struct MusicPlayer {
     songs_load: Songs,
     songs_lang: Option<Language>,
     loading: Option<Loading>,
-    now_playing: Option<NowPlaying>,
+    pub now_playing: Option<NowPlaying>,
     pending: Option<u32>,
     volume: f32,
     search: String,
     show_unavailable: bool,
     show_visualizer: bool,
-    rows: Vec<TrackRow>,
+    pub rows: Vec<TrackRow>,
     rows_stale: bool,
     matcher: FuzzyMatcher,
     scrub: Option<f64>,
@@ -155,6 +155,17 @@ impl Default for MusicPlayer {
     }
 }
 
+/// Events returned by `MusicPlayer::ui()`, used by the parent App to handle actions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MusicEvent {
+    /// A track was clicked; navigate to its detail page.
+    Select(u32),
+    /// Export the currently playing track.
+    ExportCurrent,
+    /// Export all available tracks.
+    ExportAll,
+}
+
 enum Cmd {
     Toggle,
     Scrub(f64),
@@ -168,7 +179,7 @@ impl MusicPlayer {
         self.pending = Some(row_id);
     }
 
-    pub fn ui(&mut self, ui: &mut egui::Ui, backend: &Backend) -> Option<u32> {
+    pub fn ui(&mut self, ui: &mut egui::Ui, backend: &Backend) -> Option<MusicEvent> {
         let api_url = match BACKEND_CONFIG.get(ui.ctx()) {
             Some(config) => match config.location {
                 InstallLocation::Web(url, ..) => Some(url),
@@ -189,8 +200,8 @@ impl MusicPlayer {
         }
 
         let clicked = self.side_panel(ui);
-        self.now_playing_panel(ui);
-        clicked
+        let export_clicked = self.now_playing_panel(ui);
+        clicked.or(export_clicked)
     }
 
     fn poll(&mut self, backend: &Backend, api_url: Option<String>, lang: Language) {
@@ -432,7 +443,7 @@ impl MusicPlayer {
         self.rows_stale = false;
     }
 
-    fn side_panel(&mut self, ui: &mut egui::Ui) -> Option<u32> {
+    fn side_panel(&mut self, ui: &mut egui::Ui) -> Option<MusicEvent> {
         if self.rows_stale {
             self.rebuild_rows();
         }
@@ -481,7 +492,7 @@ impl MusicPlayer {
                 Index::Failed(error) => {
                     ui.colored_label(Color32::RED, format!("加载BGM列表失败: {error}"));
                 }
-                Index::Loaded(_) => clicked = self.draw_rows(ui),
+                Index::Loaded(_) => clicked = self.draw_rows(ui).map(MusicEvent::Select),
             });
         });
         clicked
@@ -562,7 +573,8 @@ impl MusicPlayer {
         }
     }
 
-    fn now_playing_panel(&mut self, ui: &mut egui::Ui) {
+    fn now_playing_panel(&mut self, ui: &mut egui::Ui) -> Option<MusicEvent> {
+        let mut export_event = None;
         CentralPanel::default().show(ui, |ui| {
             if CollapsibleSidePanel::is_collapsed(ui.ctx(), "music_list") {
                 Panel::top("music_reexpand").show(ui, |ui| {
@@ -572,7 +584,7 @@ impl MusicPlayer {
                 });
             }
             if self.now_playing.is_some() {
-                self.draw_player(ui);
+                export_event = self.draw_player(ui);
             } else if let Some(loading) = &self.loading {
                 let phase = loading.phase();
                 let name = loading.name.clone();
@@ -589,9 +601,10 @@ impl MusicPlayer {
                 });
             }
         });
+        export_event
     }
 
-    fn draw_player(&mut self, ui: &mut egui::Ui) {
+    fn draw_player(&mut self, ui: &mut egui::Ui) -> Option<MusicEvent> {
         let now = self.now_playing.as_ref().unwrap();
         let (name, path, loop_range, channels, sample_rate, info, row_id) = (
             now.name.clone(),
@@ -602,6 +615,7 @@ impl MusicPlayer {
             now.info,
             now.row_id,
         );
+        let mut export_event = None;
         let locations = self
             .songs
             .get(&row_id)
@@ -702,6 +716,21 @@ impl MusicPlayer {
                 });
                 ui.add_space(18.0);
 
+                // Export buttons
+                let mut export = None;
+                ui.horizontal(|ui| {
+                    if ui.button("导出当前").clicked() {
+                        export = Some(MusicEvent::ExportCurrent);
+                    }
+                    if ui.button("导出全部").clicked() {
+                        export = Some(MusicEvent::ExportAll);
+                    }
+                });
+                if let Some(ev) = export {
+                    export_event = Some(ev);
+                }
+                ui.add_space(12.0);
+
                 draw_info(
                     ui,
                     &info,
@@ -740,6 +769,7 @@ impl MusicPlayer {
             Some(Cmd::ToggleVisualizer) => self.show_visualizer = !self.show_visualizer,
             None => {}
         }
+        export_event
     }
 
     fn viz_bars(&mut self, spectrum: &[u8], sample_rate: u32, playing: bool) -> Vec<f32> {

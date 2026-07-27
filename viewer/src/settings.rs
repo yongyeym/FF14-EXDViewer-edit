@@ -246,6 +246,10 @@ pub const SCHEMA_EDITOR_VISIBLE: DKey<bool> = DKey::new("schema-editor-visible",
 pub const SCHEMA_EDITOR_WORD_WRAP: DKey<bool> = DKey::new("schema-editor-word-wrap", false);
 pub const SCHEMA_EDITOR_ERRORS_SHOWN: DKey<bool> = DKey::new("schema-editor-errors-shown", false);
 
+/// Temporary: icon save request (icon_id, sheet_name, column_name, save_all)
+pub const ICON_SAVE_REQUEST: TempKey<(u32, String, String, bool)> =
+    TempKey::new("icon-save-request");
+
 pub const COLOR_THEME: FKey<ColorTheme, ThemePreference> = FKey::new_with_preflight(
     "color-theme",
     |ctx| ctx.options(|opt| opt.theme_preference),
@@ -255,12 +259,7 @@ pub const CODE_SYNTAX_THEME: FKey<CodeTheme, Arc<egui::Style>> = FKey::new_with_
     "syntax-theme",
     |ctx| ctx.global_style(),
     |_, style| CodeTheme {
-        theme: if style.visuals.dark_mode {
-            "base16-mocha.dark"
-        } else {
-            "Solarized (light)"
-        }
-        .to_owned(),
+        theme: "base16-mocha.dark".to_owned(),
         font_id: egui::FontId::monospace(egui::TextStyle::Monospace.resolve(&style).size),
     },
 );

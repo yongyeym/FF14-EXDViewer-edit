@@ -130,7 +130,7 @@ impl SetupWindow {
             if let Some(err) = &self.display_error {
                 ui.label(err.to_string());
             } else {
-                ui.label("请选择游戏文件和数据结构的存放位置。");
+                ui.label("请选择游戏文件目录（\\game\\sqpack目录）和数据结构的存放位置。");
             }
 
             let is_go_clicked = ui

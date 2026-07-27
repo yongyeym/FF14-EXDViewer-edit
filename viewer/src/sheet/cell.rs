@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     data::get_icon_path,
-    excel::provider::{ExcelProvider, ExcelRow, ExcelSheet},
-    settings::{ALWAYS_HIRES, DISPLAY_FIELD_SHOWN, EVALUATE_STRINGS, TEXT_MAX_LINES},
+    excel::provider::{ExcelHeader, ExcelProvider, ExcelRow, ExcelSheet},
+    settings::{ALWAYS_HIRES, DISPLAY_FIELD_SHOWN, EVALUATE_STRINGS, ICON_SAVE_REQUEST, TEXT_MAX_LINES},
     sheet::{
         compact_sestring::CompactSeString,
         schema_column::{ResolvedTableContext, SheetLink},
@@ -47,7 +47,7 @@ pub type SheetRef = (
 pub enum CellResponse {
     #[default]
     None,
-    Icon(u32),
+    Icon(u32, Option<String>),
     Link(SheetRef),
     Row(SheetRef),
 }
@@ -163,8 +163,13 @@ impl<'a> Cell<'a> {
     }
 
     fn draw(self, ui: &mut egui::Ui) -> anyhow::Result<InnerResponse<CellResponse>> {
+        let sheet_name = self.table_context.sheet().name().to_string();
+        let col_name = match &self.schema_column {
+            Either::Left(col) => col.name().to_string(),
+            Either::Right(_) => format!("{:?}", self.sheet_column.column.kind()),
+        };
         self.read(DISPLAY_FIELD_SHOWN.get(ui.ctx()))
-            .map(|value| value.show(ui, self.table_context.global()))
+            .map(|value| value.show(ui, self.table_context.global(), &sheet_name, &col_name))
     }
 
     fn size_text(&self, ui: &mut egui::Ui) -> f32 {
@@ -442,7 +447,7 @@ fn read_string(
     }
 }
 
-fn read_integer<T: num_traits::NumCast>(
+pub fn read_integer<T: num_traits::NumCast>(
     row: ExcelRow<'_>,
     offset: u32,
     kind: ColumnKind,
@@ -460,7 +465,7 @@ fn read_integer<T: num_traits::NumCast>(
 }
 
 impl CellValue {
-    pub fn show(self, ui: &mut egui::Ui, ctx: &GlobalContext) -> InnerResponse<CellResponse> {
+    pub fn show(self, ui: &mut egui::Ui, ctx: &GlobalContext, sheet_name: &str, col_name: &str) -> InnerResponse<CellResponse> {
         let resp = match self {
             CellValue::String(value) => string_label_wrapped(ui, &value),
             CellValue::Integer(value) => copyable_label(ui, &value),
@@ -471,9 +476,9 @@ impl CellValue {
                     return InnerResponse::new(CellResponse::None, copyable_label(ui, &icon_id));
                 };
 
-                let resp = draw_icon(ctx, ui, icon_id).on_hover_cursor(CursorIcon::PointingHand);
+                let resp = draw_icon(ctx, ui, icon_id, sheet_name, col_name).on_hover_cursor(CursorIcon::PointingHand);
                 if resp.clicked() && !should_ignore_clicks(ui) {
-                    return InnerResponse::new(CellResponse::Icon(icon_id), resp);
+                    return InnerResponse::new(CellResponse::Icon(icon_id, Some(col_name.to_string())), resp);
                 }
                 resp
             }
@@ -504,7 +509,7 @@ impl CellValue {
                 value,
             } => {
                 let resp = if let Some(cell) = value {
-                    let mut resp = cell.show(ui, ctx);
+                    let mut resp = cell.show(ui, ctx, &sheet_name, col_name);
                     resp.response = resp
                         .response
                         .on_hover_text(format!("{sheet_name}#{row_id}"));
@@ -530,7 +535,7 @@ impl CellValue {
     }
 }
 
-fn draw_icon(ctx: &GlobalContext, ui: &mut egui::Ui, icon_id: u32) -> egui::Response {
+fn draw_icon(ctx: &GlobalContext, ui: &mut egui::Ui, icon_id: u32, sheet_name: &str, col_name: &str) -> egui::Response {
     let (excel, icon_mgr) = (ctx.backend().excel().clone(), &ctx.icon_manager());
     let hires = ALWAYS_HIRES.get(ui.ctx());
     let image_source = icon_mgr.get_or_insert_icon(icon_id, hires, ui.ctx(), move || {
@@ -572,11 +577,19 @@ fn draw_icon(ctx: &GlobalContext, ui: &mut egui::Ui, icon_id: u32) -> egui::Resp
             ui.ctx().copy_text(icon_id.to_string());
             ui.close();
         }
-        // ui.add_enabled_ui(image_source.is_some(), |ui| {
-        //     if ui.button("Save").clicked() {
-        //         image_source.unwrap().load(ctx, texture_options, size_hint)
-        //     }
-        // });
+        ui.separator();
+        if ui.button("保存此图片").clicked() {
+            let sn = sheet_name.to_string();
+            let cn = col_name.to_string();
+            ICON_SAVE_REQUEST.set(ui.ctx(), (icon_id, cn, sn, false));
+            ui.close();
+        }
+        if ui.button("保存此列全部图片").clicked() {
+            let sn = sheet_name.to_string();
+            let cn = col_name.to_string();
+            ICON_SAVE_REQUEST.set(ui.ctx(), (icon_id, cn, sn, true));
+            ui.close();
+        }
     });
     resp
 }
