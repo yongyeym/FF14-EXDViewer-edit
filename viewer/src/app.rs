@@ -876,6 +876,7 @@ impl App {
 
             let sheets_filter = SHEETS_FILTER.get(ctx);
             let misc_sheets_shown = MISC_SHEETS_SHOWN.get(ctx);
+            
             let backend = self.backend.clone().unwrap();
             let sheets = self
                 .sheet_filter_data
@@ -896,6 +897,10 @@ impl App {
                 })
                 .clone();
 
+            let sheets = if self.show_new_sheets_only && self.sheet_list_state.starts_with("ready") {
+                let set: std::collections::HashSet<&str> = self.sheet_new_items.iter().map(String::as_str).collect();
+                Rc::new(sheets.iter().filter(|(name, _)| set.contains(name.as_str())).cloned().collect())
+            } else { sheets };
             let sheets = match &pr_changed {
                 PrChangedState::Ready(changed) if PR_CHANGED_ONLY.get(ctx) => Rc::new(
                     sheets
@@ -905,21 +910,6 @@ impl App {
                         .collect::<Vec<_>>(),
                 ),
                 _ => sheets,
-            };
-
-            // Apply new-only sheet filter
-            let sheets = if self.show_new_sheets_only && self.sheet_list_state.starts_with("ready") {
-                let new_set: std::collections::HashSet<&str> =
-                    self.sheet_new_items.iter().map(String::as_str).collect();
-                Rc::new(
-                    sheets
-                        .iter()
-                        .filter(|(name, _)| new_set.contains(name.as_str()))
-                        .cloned()
-                        .collect::<Vec<_>>(),
-                )
-            } else {
-                sheets
             };
 
             egui::CentralPanel::default().show(ui, |ui| {
@@ -2221,10 +2211,12 @@ impl App {
                                 .save_file()
                                 .await
                             {
+                                let saved_path = file.path().to_path_buf();
                                 if let Err(e) = file.write(&audio_data).await {
                                     log::error!("导出音频 {stem} 失败: {e}");
                                 } else {
                                     log::info!("音频导出成功: {stem}");
+                                    convert_hca_to_wav(&saved_path);
                                 }
                             }
                         } else {
@@ -2535,6 +2527,32 @@ impl eframe::App for App {
         self.draw(ui);
         tick_promises(ui.ctx());
     }
+}
+
+
+/// After a music file is exported, if it's HCA format, convert to WAV using hca.exe.
+fn convert_hca_to_wav(file_path: &std::path::Path) {
+    let ext = file_path.extension().and_then(|s| s.to_str()).unwrap_or("");
+    if ext.to_ascii_lowercase() != "hca" { return; }
+    let hca_exe = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.join("tools").join("hca.exe")))
+        .filter(|p| p.exists())
+        .or_else(|| {
+            let dev = std::path::PathBuf::from("tools").join("hca.exe");
+            dev.exists().then_some(dev)
+        });
+    let Some(hca_path) = hca_exe else {
+        log::warn!("hca.exe 未找到，跳过HCA转WAV转码");
+        return;
+    };
+    log::info!("转码 HCA→WAV: {}", file_path.display());
+    let _ = std::process::Command::new(&hca_path)
+        .arg("-a").arg("E0748978")
+        .arg("-b").arg("CF222F1F")
+        .arg(file_path.as_os_str())
+        .spawn();
+    log::info!("已启动 hca.exe 转码任务");
 }
 
 fn add_links(ui: &mut egui::Ui, open_about: &mut bool) {
