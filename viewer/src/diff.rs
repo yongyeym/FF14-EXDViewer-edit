@@ -126,15 +126,23 @@ fn compute_diff(
     for k in &all { if !keys.contains(k) { keys.push(k); } }
     keys.sort();
 
+    let mut diff_count = 0;
     for key in keys {
         match (old.get(key), new.get(key)) {
-            (Some(_), None) => result.push(DiffRow { row_key: key.clone(), diff_type: DiffType::Deleted, cells: vec![] }),
-            (None, Some((_, cells))) => result.push(DiffRow { row_key: key.clone(), diff_type: DiffType::Added, cells: cells.clone() }),
+            (Some(_), None) => { result.push(DiffRow { row_key: key.clone(), diff_type: DiffType::Deleted, cells: vec![] }); }
+            (None, Some((_, cells))) => { result.push(DiffRow { row_key: key.clone(), diff_type: DiffType::Added, cells: cells.clone() }); }
             (Some((_, oc)), Some((_, nc))) => {
-                // Compare only the common prefix (min length) to handle varying subrow counts
                 let common = oc.len().min(nc.len());
                 let cells_match = oc[..common] == nc[..common];
                 if !cells_match {
+                    if diff_count < 3 {
+                        let mut diffs = Vec::new();
+                        for i in 0..common {
+                            if oc[i] != nc[i] { diffs.push(i); }
+                        }
+                        log::debug!("Row {:?} differs at cols {:?}: old[0..3]={:?} new[0..3]={:?}", key, diffs, &oc[..3], &nc[..3]);
+                    }
+                    diff_count += 1;
                     result.push(DiffRow { row_key: key.clone(), diff_type: DiffType::Deleted, cells: oc.clone() });
                     result.push(DiffRow { row_key: key.clone(), diff_type: DiffType::Added, cells: nc.clone() });
                 }
@@ -142,6 +150,7 @@ fn compute_diff(
             _ => {}
         }
     }
+    log::debug!("Diff total: {} row groups with changes", result.len());
     result
 }
 
