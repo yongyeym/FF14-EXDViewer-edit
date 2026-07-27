@@ -84,12 +84,19 @@ fn load_csv_ci(version: &str, sheet_name: &str) -> Result<(Vec<String>, HashMap<
 
     let mut rows: HashMap<String, (u64, Vec<String>)> = HashMap::new();
 
+    // Detect if CSV has 'Subrow' column (skip it if present)
+    let has_subrow = headers.get(1).map(|h| h == "Subrow").unwrap_or(false);
+
     for result in reader.records() {
         let record = result.map_err(|e| format!("CSV记录解析失败: {e}"))?;
         let row_id = record.get(0).unwrap_or("").to_string();
-        let values: Vec<String> = record.iter().skip(1)
-            .map(|v| v.to_ascii_lowercase()) // case-insensitive
-            .collect();
+        let values: Vec<String> = if has_subrow {
+            record.iter().skip(2) // Row, Subrow → data starts at col 2
+        } else {
+            record.iter().skip(1) // Row → data starts at col 1
+        }
+        .map(|v| v.to_ascii_lowercase())
+        .collect();
         let hash = ci_hash(&values);
         rows.entry(row_id).or_insert((hash, values));
     }
