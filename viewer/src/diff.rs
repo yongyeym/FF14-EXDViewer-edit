@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use crate::sheet::cell::draw_icon;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -285,61 +286,105 @@ pub enum DiffAction {
 
 pub fn draw_diff_table(diff: &DiffState, ui: &mut egui::Ui, context: &crate::sheet::TableContext) -> CellResponse {
     use crate::excel::provider::ExcelHeader;
-    use crate::sheet::cell::draw_icon;
-
     let rows = &diff.diff_rows;
     let cols = &diff.columns;
     let ctx = context.global();
     let sheet_name = context.sheet().name();
     let data_col_start = if cols.len() > 1 && cols[1] == "Subrow" { 2 } else { 1 };
-    let _col_count = context.column_count();
 
-    // Build column-name → is-icon lookup (by name, not index)
+    // Build icon column names
     let all_cols = context.columns().ok().unwrap_or_default();
     let mut icon_col_names = std::collections::HashSet::new();
     for (sc, _sd) in &all_cols {
-        // Check if this schema column is an Icon type via Debug representation
-        let meta_repr = format!("{:?}", sc.meta());
-        if meta_repr == "Icon" {
+        if format!("{:?}", sc.meta()) == "Icon" {
             icon_col_names.insert(sc.name().to_string());
         }
     }
-    log::debug!("diff: icon column names: {:?}", icon_col_names);
 
-    egui::ScrollArea::both().auto_shrink(false).id_salt("diff_full").show(ui, |ui| {
-        ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Diff").strong().size(11.0));
-            ui.label(egui::RichText::new("Row").strong().size(11.0));
-            for ci in data_col_start..cols.len() {
-                ui.label(egui::RichText::new(&cols[ci]).strong().size(11.0));
-            }
+    // Column header names for data columns
+    let data_headers: Vec<&str> = cols.iter().skip(data_col_start).map(|s| s.as_str()).collect();
+
+    let total_cols = 2 + data_headers.len(); // Diff, Row, data columns
+    let row_height = ui.text_style_height(&egui::TextStyle::Button);
+
+    let id = egui::Id::new("diff_egui_table");
+    ui.push_id(id, |ui| {
+        let table = egui_table::Table::new()
+            .num_rows(rows.len() as u64)
+            .columns(vec![egui_table::Column::new(50.0).resizable(true); total_cols])
+            .num_sticky_cols(2) // Diff + Row always visible
+            .headers([egui_table::HeaderRow::new(row_height + 8.0)]);
+
+        table.show(ui, &mut DiffTableDelegate {
+            rows,
+            data_headers: &data_headers,
+            data_col_start,
+            icon_col_names: &icon_col_names,
+            ctx,
+            sheet_name,
         });
-        ui.separator();
-
-        for row in rows {
-            ui.horizontal(|ui| {
-                let m = match row.diff_type {
-                    DiffType::Deleted => egui::RichText::new("-").color(Color32::RED).strong(),
-                    DiffType::Added => egui::RichText::new("+").color(Color32::GREEN).strong(),
-                };
-                ui.add(egui::Label::new(m).sense(egui::Sense::click()));
-                ui.label(&row.row_key);
-
-                for ci in 0..row.cells.len() {
-                    let col_name = cols.get(data_col_start + ci).map(|s| s.as_str()).unwrap_or("");
-                    if icon_col_names.contains(col_name) {
-                        if let Ok(id) = row.cells[ci].parse::<u32>() {
-                            log::debug!("diff: rendering icon at col {} name='{}' id={}", ci, col_name, id);
-                            draw_icon(ctx, ui, id, sheet_name, col_name);
-                            continue;
-                        }
-                    }
-                    ui.add(egui::Label::new(row.cells[ci].as_str()).sense(egui::Sense::click()).wrap_mode(egui::TextWrapMode::Truncate));
-                }
-            });
-        }
     });
     CellResponse::None
+}
+
+struct DiffTableDelegate<'a> {
+    rows: &'a [DiffRow],
+    data_headers: &'a [&'a str],
+    data_col_start: usize,
+    icon_col_names: &'a std::collections::HashSet<String>,
+    ctx: &'a crate::sheet::GlobalContext,
+    sheet_name: &'a str,
+}
+
+impl egui_table::TableDelegate for DiffTableDelegate<'_> {
+    fn cell_ui(&mut self, ui: &mut egui::Ui, cell: &egui_table::CellInfo) {
+        let col = cell.col_nr;
+        let row_idx = cell.row_nr as usize;
+
+        if row_idx >= self.rows.len() {
+            return;
+        }
+
+        let diff_row = &self.rows[row_idx];
+
+        if col == 0 {
+            // Diff marker column
+            let m = match diff_row.diff_type {
+                DiffType::Deleted => egui::RichText::new("-").color(Color32::RED).strong(),
+                DiffType::Added => egui::RichText::new("+").color(Color32::GREEN).strong(),
+            };
+            ui.add(egui::Label::new(m).sense(egui::Sense::click()));
+        } else if col == 1 {
+            // Row key
+            ui.add(egui::Label::new(&diff_row.row_key).sense(egui::Sense::click()));
+        } else {
+            // Data columns
+            let ci = col - 2;
+            if ci < diff_row.cells.len() && ci < self.data_headers.len() {
+                let col_name = self.data_headers[ci];
+                if self.icon_col_names.contains(col_name) {
+                    if let Ok(id) = diff_row.cells[ci].parse::<u32>() {
+                        draw_icon(self.ctx, ui, id, self.sheet_name, col_name);
+                        return;
+                    }
+                }
+                ui.add(egui::Label::new(diff_row.cells[ci].as_str()).sense(egui::Sense::click()).wrap_mode(egui::TextWrapMode::Truncate));
+            }
+        }
+    }
+
+    fn header_cell_ui(&mut self, ui: &mut egui::Ui, cell: &egui_table::HeaderCellInfo) {
+        if cell.group_index == 0 {
+            ui.strong("Diff");
+        } else if cell.group_index == 1 {
+            ui.strong("Row");
+        } else {
+            let ci = cell.group_index - 2;
+            if ci < self.data_headers.len() {
+                ui.strong(self.data_headers[ci]);
+            }
+        }
+    }
 }
 fn exe_export_data_dir() -> PathBuf {
     std::env::current_exe().ok()
