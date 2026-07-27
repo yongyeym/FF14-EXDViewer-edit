@@ -85,6 +85,7 @@ impl IconManagerImpl {
         hires: bool,
         ctx: &egui::Context,
         result: <IconPromise as PromiseKind>::Output,
+        png_cache: &mut HashMap<(u32, bool), Vec<u8>>,
     ) -> CloneableResult<ImageSource<'static>> {
         match result {
             Ok(Either::Left(url)) => Ok(ImageSource::Uri(url.to_string().into())),
@@ -97,6 +98,11 @@ impl IconManagerImpl {
                     ),
                     TextureOptions::LINEAR,
                 );
+                // Cache PNG bytes for clipboard copy
+                let mut buf = std::io::Cursor::new(Vec::new());
+                if data.write_to(&mut buf, image::ImageFormat::Png).is_ok() {
+                    png_cache.insert((icon_id, hires), buf.into_inner());
+                }
                 let ret = SizedTexture::from_handle(&handle);
                 handles.push(handle);
                 Ok(ImageSource::Texture(ret))
@@ -114,7 +120,7 @@ impl IconManagerImpl {
     //         None => return ManagedIcon::NotLoaded,
     //     };
     //     let ret = entry
-    //         .get(|r| Self::convert_promise(&mut self.loaded_handles, icon_id, hires, context, r))
+    //         .get(|r| Self::convert_promise(&mut self.loaded_handles, icon_id, hires, context, r, &mut self.png_cache))
     //         .cloned();
     //     match ret {
     //         Some(Ok(image)) => ManagedIcon::Loaded(image),
@@ -135,7 +141,7 @@ impl IconManagerImpl {
             .entry((icon_id, hires))
             .or_insert_with(|| ConvertiblePromise::new_promise(promise_creator()))
             .get_mut(|r| {
-                Self::convert_promise(&mut self.loaded_handles, icon_id, hires, context, r)
+                Self::convert_promise(&mut self.loaded_handles, icon_id, hires, context, r, &mut self.png_cache)
             })
             .cloned();
         match ret {
