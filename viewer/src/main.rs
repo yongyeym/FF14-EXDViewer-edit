@@ -20,7 +20,9 @@ use ff14_exdviewer_edit::App;
 fn main() -> eframe::Result {
     CombinedLogger(
         env_logger::Builder::from_env(env_logger::Env::new().default_filter_or("info")).build(),
-        egui_logger::builder().build(),
+        egui_logger::builder()
+            .max_level(log::LevelFilter::Debug)
+            .build(),
     )
     .init();
     log::set_max_level(log::LevelFilter::Debug);

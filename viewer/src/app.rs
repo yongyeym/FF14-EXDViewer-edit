@@ -686,9 +686,10 @@ impl App {
             });
     }
 
-    fn draw_logger(&mut self, ctx: &egui::Context) {
+fn draw_logger(&mut self, ctx: &egui::Context) {
         let logger_shown = LOGGER_SHOWN.get(ctx);
         let mut logger_shown_toggle = logger_shown;
+        // Default level set via builder.log_levels() in main.rs
         egui::Window::new("日志")
             .open(&mut logger_shown_toggle)
             .show(ctx, |ui| {
@@ -698,7 +699,6 @@ impl App {
             LOGGER_SHOWN.set(ctx, logger_shown_toggle);
         }
     }
-
     fn poll_changed_schemas(&mut self, ctx: &egui::Context) -> PrChangedState {
         let key = match BACKEND_CONFIG.get(ctx) {
             Some(BackendConfig {
