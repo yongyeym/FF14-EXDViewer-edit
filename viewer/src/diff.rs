@@ -292,7 +292,8 @@ pub fn draw_diff_table(diff: &DiffState, ui: &mut egui::Ui, context: &crate::she
     let data_col_start = if cols.len() > 1 && cols[1] == "Subrow" { 2 } else { 1 };
 
     // Build icon column names
-    let all_cols = context.columns().ok().unwrap_or_default();
+    log::debug!("draw_diff_table: rows={} cols={}", rows.len(), cols.len());
+    let all_cols = context.columns().unwrap_or_default();
     let mut icon_col_names = std::collections::HashSet::new();
     for (sc, _sd) in &all_cols {
         if format!("{:?}", sc.meta()) == "Icon" {
