@@ -59,20 +59,23 @@ fn download_exdschema_impl(
 
     let resp = client
         .get(&api_url)
+        .header("Accept", "application/vnd.github.v3+json")
         .send()
         .map_err(|e| format!("请求目录列表失败: {e}"))?;
 
-    if !resp.status().is_success() {
+        let resp_status = resp.status();
+        let body_text = resp.text().map_err(|e| format!("读取响应体失败: {e}"))?;
+
+    if !resp_status.is_success() {
         return Err(format!(
-            "GitHub API返回状态码: {} (访问 {} 可能需要token)",
-            resp.status(),
+            "GitHub API返回状态码: {} (访问 {} 可能需要token)\n响应: {body_text}",
+            resp_status,
             api_url
         ));
     }
 
-    let entries: Vec<serde_json::Value> = resp
-        .json()
-        .map_err(|e| format!("解析目录列表JSON失败: {e}"))?;
+    let entries: Vec<serde_json::Value> = serde_json::from_str(&body_text)
+        .map_err(|e| format!("解析目录列表JSON失败: {e}\n响应前500字: {}\nURL: {}", &body_text[..body_text.len().min(500)], api_url))?;
 
     // Ensure destination directory exists
     std::fs::create_dir_all(dest_dir)
@@ -153,6 +156,7 @@ fn download_hca_impl(
 
     let resp = client
         .get(&api_releases)
+        .header("Accept", "application/vnd.github.v3+json")
         .send()
         .map_err(|e| format!("获取Release信息失败: {e}"))?;
 

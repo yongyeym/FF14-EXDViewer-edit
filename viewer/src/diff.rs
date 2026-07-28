@@ -341,27 +341,35 @@ pub fn draw_diff_table(diff: &DiffState, ui: &mut egui::Ui, context: &crate::she
             modal_icon_id: &mut modal_icon_id,
         });
 
-        // Icon preview modal
-        if let Some(icon_id) = modal_icon_id.take() {
+        // Icon preview window (persistent via memory data)
+        let modal_id = egui::Id::new("diff_modal_icon");
+        if let Some(id) = modal_icon_id {
+            ui.memory_mut(|mem| mem.data.insert_temp(modal_id, id));
+        }
+        if let Some(icon_id) = ui.memory(|mem| mem.data.get_temp::<u32>(modal_id)) {
             let ctx = context.global();
             let sg = ctx.backend().excel().clone();
             let icon_mgr = &ctx.icon_manager();
-            egui::Modal::new(egui::Id::new("diff_icon_modal")).show(ui.ctx(), |ui| {
-                let snapshot = icon_mgr.get_or_insert_icon(icon_id, true, ui.ctx(), move || {
-                    let sg = sg.clone();
-                    crate::utils::TrackedPromise::spawn_local(
-                        async move { sg.get_icon(icon_id, true).await }
-                    )
+            let mut open = true;
+            egui::Window::new(format!("图片预览 (Icon {icon_id})"))
+                .id(egui::Id::new("diff_icon_window"))
+                .open(&mut open)
+                .show(ui.ctx(), |ui| {
+                    let snapshot = icon_mgr.get_or_insert_icon(icon_id, true, ui.ctx(), move || {
+                        let sg = sg.clone();
+                        crate::utils::TrackedPromise::spawn_local(
+                            async move { sg.get_icon(icon_id, true).await }
+                        )
+                    });
+                    if let crate::utils::ManagedIcon::Loaded(source) = snapshot {
+                        ui.add(egui::Image::new(source).fit_to_exact_size(egui::vec2(400.0, 400.0)));
+                    } else {
+                        ui.label("加载中...");
+                    }
                 });
-                if let crate::utils::ManagedIcon::Loaded(source) = snapshot {
-                    ui.add(egui::Image::new(source).fit_to_exact_size(egui::vec2(400.0, 400.0)));
-                } else {
-                    ui.label("加载中...");
-                }
-                if ui.button("关闭").clicked() {
-                    ui.close();
-                }
-            });
+            if !open {
+                ui.memory_mut(|mem| mem.data.remove::<u32>(modal_id));
+            }
         }
     });
     CellResponse::None
