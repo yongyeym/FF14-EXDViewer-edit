@@ -375,21 +375,30 @@ impl egui_table::TableDelegate for DiffTableDelegate<'_> {
     }
 
     fn row_top_offset(&self, _ctx: &egui::Context, _table_id: egui::Id, row_nr: u64) -> f32 {
-        // Estimate row height based on wrapped text content
         let line_height = 20.0;
-        let chars_per_col = 30.0; // approximate
+        let min_icon_height = 32.0; // minimum height to fully display an icon
+        let chars_per_col = 30.0;
         let mut offset = 0.0f32;
         for r in 0..=row_nr {
-            if r == 0 { continue; } // row 0 starts at 0.0
+            if r == 0 { continue; }
             let ri = (r - 1) as usize;
             let mut max_lines = 1u32;
+            let mut has_icon = false;
             if let Some(row) = self.rows.get(ri) {
-                for cell in &row.cells {
+                for (ci, cell) in row.cells.iter().enumerate() {
                     let est_lines = ((cell.len() as f32) / chars_per_col).ceil() as u32;
                     if est_lines > max_lines { max_lines = est_lines; }
+                    // Check if this column is an icon column
+                    if let Some(col_info) = self.col_meta.get(ci) {
+                        if self.icon_col_names.contains(&col_info.0) {
+                            has_icon = true;
+                        }
+                    }
                 }
             }
-            offset += (max_lines as f32).max(1.0) * line_height;
+            let text_height = (max_lines as f32).max(1.0) * line_height;
+            let row_h = if has_icon { text_height.max(min_icon_height) } else { text_height };
+            offset += row_h;
         }
         offset
     }
