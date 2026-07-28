@@ -46,36 +46,74 @@ fn download_exdschema_impl(
     dest_dir: &PathBuf,
     status: &SharedStatus,
 ) -> Result<(), String> {
-    // Build the raw GitHub URL for the schemas/latest directory on main branch
-    let api_url = format!(
-        "https://api.github.com/repos/xivdev/EXDSchema/contents/schemas/latest"
-    );
-
-    // Fetch directory listing
+    // Fetch the directory listing from GitHub Contents API
+    // The schemas/latest path is a submodule; we resolve it via the tree SHA
     let client = reqwest::blocking::Client::builder()
         .user_agent("FF14-EXDViewer-edit/1.0")
         .build()
         .map_err(|e| format!("创建HTTP客户端失败: {e}"))?;
 
+    // Step 1: Get the submodule info to find the commit SHA
+    let api_url = format!(
+        "https://api.github.com/repos/xivdev/EXDSchema/contents/schemas/latest"
+    );
     let resp = client
         .get(&api_url)
         .header("Accept", "application/vnd.github.v3+json")
         .send()
-        .map_err(|e| format!("请求目录列表失败: {e}"))?;
-
-        let resp_status = resp.status();
-        let body_text = resp.text().map_err(|e| format!("读取响应体失败: {e}"))?;
-
+        .map_err(|e| format!("请求子模块信息失败: {e}"))?;
+    let resp_status = resp.status();
+    let body_text = resp.text().map_err(|e| format!("读取响应体失败: {e}"))?;
     if !resp_status.is_success() {
         return Err(format!(
-            "GitHub API返回状态码: {} (访问 {} 可能需要token)\n响应: {body_text}",
-            resp_status,
-            api_url
+            "GitHub API返回状态码: {} (访问 {} 可能需要token)\n响应: {body_text}", resp_status, api_url
         ));
     }
+    let submodule: serde_json::Value = serde_json::from_str(&body_text)
+        .map_err(|e| format!("解析子模块JSON失败: {e}\n响应: {}", &body_text[..body_text.len().min(500)]))?;
+    let is_submodule = submodule["type"].as_str() == Some("submodule");
 
-    let entries: Vec<serde_json::Value> = serde_json::from_str(&body_text)
-        .map_err(|e| format!("解析目录列表JSON失败: {e}\n响应前500字: {}\nURL: {}", &body_text[..body_text.len().min(500)], api_url))?;
+    let sha = if is_submodule { submodule["sha"].as_str().unwrap_or("").to_string() } else { String::new() };
+    let (entries, _source_desc): (Vec<serde_json::Value>, String) = if is_submodule {
+        // Submodule: use Git Trees API with recursive=1 to get all files at that commit
+        let sha = submodule["sha"].as_str().unwrap_or("");
+        let tree_url = format!(
+            "https://api.github.com/repos/xivdev/EXDSchema/git/trees/{sha}?recursive=1"
+        );
+        let tresp = client
+            .get(&tree_url)
+            .header("Accept", "application/vnd.github.v3+json")
+            .send()
+            .map_err(|e| format!("获取文件树失败: {e}"))?;
+        let tstatus = tresp.status();
+        let tbody = tresp.text().map_err(|e| format!("读取文件树响应失败: {e}"))?;
+        if !tstatus.is_success() {
+            return Err(format!(
+                "GitHub Trees API返回状态码: {}\n响应: {}",
+                tstatus, &tbody[..tbody.len().min(500)]
+            ));
+        }
+        let tree: serde_json::Value = serde_json::from_str(&tbody)
+            .map_err(|e| format!("解析文件树JSON失败: {e}\n响应: {}", &tbody[..tbody.len().min(500)]))?;
+        let items = tree["tree"].as_array().cloned().unwrap_or_default();
+        // Filter to only .yml files (blob type)
+        let yml_files: Vec<serde_json::Value> = items.into_iter()
+            .filter(|item| {
+                item["type"].as_str() == Some("blob")
+                && item["path"].as_str().map_or(false, |p| p.ends_with(".yml"))
+            })
+            .collect();
+        (yml_files, format!("(文件树, SHA={sha})"))
+    } else {
+        // Regular directory
+        let items: Vec<serde_json::Value> = serde_json::from_str(&body_text)
+            .map_err(|e| format!("解析目录JSON失败: {e}"))?;
+        (items, String::new())
+    };
+
+    if entries.is_empty() {
+        return Err("目录中没有找到任何.yml文件".to_string());
+    }
 
     // Ensure destination directory exists
     std::fs::create_dir_all(dest_dir)
@@ -83,7 +121,9 @@ fn download_exdschema_impl(
 
     let total = entries.len();
     for (i, entry) in entries.iter().enumerate() {
-        let name = entry["name"].as_str().unwrap_or("unknown");
+        let name = entry["name"].as_str()
+            .or_else(|| entry["path"].as_str())
+            .unwrap_or("unknown");
         let typ = entry["type"].as_str().unwrap_or("");
 
         {
@@ -91,9 +131,15 @@ fn download_exdschema_impl(
             *s = DownloadStatus::Downloading(format!("EXDSchema [{}/{}] {}", i + 1, total, name));
         }
 
-        if typ == "file" && name.ends_with(".yml") {
-            let download_url = entry["download_url"]
-                .as_str()
+        // Tree API entries have 'blob' type; Contents API has 'file'
+        if (typ == "file" || typ == "blob") && name.ends_with(".yml") {
+            // Construct raw download URL from GitHub
+            let download_url = entry["download_url"].as_str().map(|s| s.to_string())
+                .or_else(|| {
+                    entry["path"].as_str().map(|path| {
+                        format!("https://raw.githubusercontent.com/xivdev/EXDSchema/{}/{path}", sha)
+                    })
+                })
                 .ok_or_else(|| format!("{name} 缺少下载URL"))?;
 
             let file_resp = client
