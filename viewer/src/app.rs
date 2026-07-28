@@ -1251,6 +1251,7 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                                     status: "selecting".into(),
                                     diff_rows: Vec::new(),
                                     columns: Vec::new(),
+                                    modal_icon_id: None,
                                 };
                             }
 
@@ -1259,25 +1260,7 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                                 ui.spinner();
                             }
                             ui.add_enabled_ui(!exporting, |ui| {
-                                ui.menu_button("下载", |ui| {
-                                if ui.button("下载EXDSchema").clicked() {
-                                    let url = crate::config_file::load_backend_config()
-                                        .and_then(|c| c.exdschema_url)
-                                        .unwrap_or_else(|| crate::downloader::DEFAULT_EXDSCHEMA_URL.to_string());
-                                    let status = self.download_exdschema_status.clone();
-                                    crate::downloader::start_download_exdschema(&url, status);
-                                    ui.close();
-                                }
-                                if ui.button("下载HCADecoder").clicked() {
-                                    let url = crate::config_file::load_backend_config()
-                                        .and_then(|c| c.hca_url)
-                                        .unwrap_or_else(|| crate::downloader::DEFAULT_HCA_DECODER_URL.to_string());
-                                    let status = self.download_hca_status.clone();
-                                    crate::downloader::start_download_hca(&url, status);
-                                    ui.close();
-                                }
-                            });
-                            ui.menu_button("导出", |ui| {
+    ui.menu_button("导出", |ui| {
                                     if ui
                                         .button("导出CSV")
                                         .on_hover_text("链接导出为显示值")
@@ -1903,11 +1886,8 @@ let sheet_name = table.context().sheet().name().to_string();
                                     crate::list_tracker::ComparisonResult::SameVersion => "no_changes".into(),
                                     crate::list_tracker::ComparisonResult::NewItems(items) => {
                                         let c = items.len();
-                                        // Cross-validate music paths against actual loaded rows
-                                        let valid: std::collections::HashSet<&str> = self.music.rows.iter().map(|r| r.path.as_str()).collect();
-                                        let validated: Vec<String> = items.into_iter().filter(|name| valid.contains(name.as_str())).collect();
-                                        log::debug!("Validated music new items: {} (of {} raw)", validated.len(), c);
-                                        self.music_new_items = validated;
+                                        log::debug!("Music new items: {} raw", c);
+                                        self.music_new_items = items;
                                         format!("ready:{c}")
                                     }
                                     crate::list_tracker::ComparisonResult::Error(e) => format!("error:{e}"),

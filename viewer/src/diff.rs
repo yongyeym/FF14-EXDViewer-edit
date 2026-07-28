@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use crate::excel::provider::ExcelHeader;
 use crate::sheet::cell::draw_icon;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -14,6 +15,7 @@ pub struct DiffState {
     pub status: String,
     pub diff_rows: Vec<DiffRow>,
     pub columns: Vec<String>,
+    pub modal_icon_id: Option<u32>,
 }
 
 #[derive(Clone)]
@@ -35,6 +37,7 @@ impl DiffState {
             status: "idle".into(),
             diff_rows: Vec::new(),
             columns: Vec::new(),
+            modal_icon_id: None,
         }
     }
 }
@@ -437,11 +440,21 @@ impl egui_table::TableDelegate for DiffTableDelegate<'_> {
                     let col_name = &self.col_meta[ci].0;
                     if self.icon_col_names.contains(col_name) {
                         if let Ok(id) = diff_row.cells[ci].parse::<u32>() {
-                            { use crate::excel::provider::ExcelHeader; draw_icon(self.context.global(), ui, id, self.context.sheet().name(), col_name); }
+                            let resp = { use crate::excel::provider::ExcelHeader; draw_icon(self.context.global(), ui, id, self.context.sheet().name(), col_name) };
+                            if resp.clicked() {
+                                crate::settings::ICON_SAVE_REQUEST.set(ui.ctx(), (id, col_name.to_string(), self.context.sheet().name().to_string(), false));
+                            }
                             return;
                         }
                     }
-                    ui.add(egui::Label::new(&diff_row.cells[ci]).sense(egui::Sense::click()).wrap_mode(egui::TextWrapMode::Wrap));
+                    let text = diff_row.cells[ci].clone();
+                    let resp = ui.add(egui::Label::new(&text).sense(egui::Sense::click()).wrap_mode(egui::TextWrapMode::Wrap));
+                    resp.context_menu(|ui| {
+                        if ui.button("复制").clicked() {
+                            ui.ctx().copy_text(text);
+                            ui.close();
+                        }
+                    });
                 }
             }
         });
