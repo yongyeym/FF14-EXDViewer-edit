@@ -194,8 +194,13 @@ pub struct App {
     sheet_list_state: String,
     music_list_state: String,
 
-    // ── Version Diff ──
+    
+                // ── Version Diff ──
     diff_state: crate::diff::DiffState,
+
+    // ── Download ──
+    download_exdschema_status: crate::downloader::SharedStatus,
+    download_hca_status: crate::downloader::SharedStatus,
 }
 
 fn create_router(ctx: egui::Context) -> Result<Router<App>> {
@@ -1254,7 +1259,25 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                                 ui.spinner();
                             }
                             ui.add_enabled_ui(!exporting, |ui| {
-                                ui.menu_button("导出", |ui| {
+                                ui.menu_button("下载", |ui| {
+                                if ui.button("下载EXDSchema").clicked() {
+                                    let url = crate::config_file::load_backend_config()
+                                        .and_then(|c| c.exdschema_url)
+                                        .unwrap_or_else(|| crate::downloader::DEFAULT_EXDSCHEMA_URL.to_string());
+                                    let status = self.download_exdschema_status.clone();
+                                    crate::downloader::start_download_exdschema(&url, status);
+                                    ui.close();
+                                }
+                                if ui.button("下载HCADecoder").clicked() {
+                                    let url = crate::config_file::load_backend_config()
+                                        .and_then(|c| c.hca_url)
+                                        .unwrap_or_else(|| crate::downloader::DEFAULT_HCA_DECODER_URL.to_string());
+                                    let status = self.download_hca_status.clone();
+                                    crate::downloader::start_download_hca(&url, status);
+                                    ui.close();
+                                }
+                            });
+                            ui.menu_button("导出", |ui| {
                                     if ui
                                         .button("导出CSV")
                                         .on_hover_text("链接导出为显示值")
@@ -1341,7 +1364,41 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                 }
 
                 // ── Version Diff ──
-                let sheet_name = table.context().sheet().name().to_string();
+                
+                // ── Download Status Window ──
+                let download_msgs: Vec<(String, &std::sync::Arc<std::sync::Mutex<crate::downloader::DownloadStatus>>)> = {
+                    let mut v = Vec::new();
+                    let ds = self.download_exdschema_status.lock().unwrap().clone();
+                    if ds != crate::downloader::DownloadStatus::Idle {
+                        v.push(("EXDSchema".to_string(), &self.download_exdschema_status));
+                    }
+                    let dh = self.download_hca_status.lock().unwrap().clone();
+                    if dh != crate::downloader::DownloadStatus::Idle {
+                        v.push(("HCADecoder".to_string(), &self.download_hca_status));
+                    }
+                    v
+                };
+                if !download_msgs.is_empty() {
+                    egui::Window::new("下载进度").id("download_progress".into()).show(ctx, |ui| {
+                        for (name, status_arc) in &download_msgs {
+                            let st = status_arc.lock().unwrap().clone();
+                            let (msg, is_done) = match &st {
+                                crate::downloader::DownloadStatus::Downloading(s) => (format!("{name}: {s}"), false),
+                                crate::downloader::DownloadStatus::Done => (format!("{name} 下载完成"), true),
+                                crate::downloader::DownloadStatus::Error(e) => (format!("{name}: {e}"), true),
+                                _ => (String::new(), false),
+                            };
+                            if !msg.is_empty() {
+                                ui.label(msg);
+                            }
+                            if is_done && ui.button("关闭").clicked() {
+                                *status_arc.lock().unwrap() = crate::downloader::DownloadStatus::Idle;
+                            }
+                        }
+                    });
+                }
+
+let sheet_name = table.context().sheet().name().to_string();
                 if let Some(action) = crate::diff::draw_diff_window(
                     &mut self.diff_state, ui, &sheet_name, &self.diff_result,
                 ) {
@@ -2419,6 +2476,8 @@ impl App {
             sheet_list_state: "loading".to_string(),
             music_list_state: "loading".to_string(),
             diff_state: crate::diff::DiffState::new(),
+            download_exdschema_status: std::sync::Arc::new(std::sync::Mutex::new(crate::downloader::DownloadStatus::Idle)),
+            download_hca_status: std::sync::Arc::new(std::sync::Mutex::new(crate::downloader::DownloadStatus::Idle)),
         }
     }
 

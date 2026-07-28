@@ -735,7 +735,12 @@ impl SetupWindow {
                     let location = self.location.clone();
                     let schema = self.schema.clone();
                     self.setup_promise = Some(UnsendPromise::new(async move {
-                        let config = BackendConfig { location, schema };
+                        let config = BackendConfig {
+                            location,
+                            schema,
+                            exdschema_url: None,
+                            hca_url: None,
+                        };
                         Backend::new(config.clone())
                             .await
                             .map(|backend| (backend, config))

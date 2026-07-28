@@ -67,6 +67,7 @@ wildmatch = "2"
 regex-lite = "0.1"
 pest = "2"
 pest_derive = "2"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json"] }
 compact_str = { version = "0.10", features = ["smallvec"] }
 smallvec = { version = "1", features = ["union"] }
 csv = "1"

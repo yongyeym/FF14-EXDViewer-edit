@@ -28,6 +28,7 @@ mod backend;
 pub mod config_file;
 pub mod data;
 pub mod diff;
+pub mod downloader;
 pub mod list_tracker;
 mod editable_schema;
 mod excel;

@@ -2361,6 +2361,7 @@ dependencies = [
  "poll-promise",
  "regex-lite",
  "replace_with",
+ "reqwest 0.12.28",
  "rfd",
  "rodio",
  "serde",
@@ -5597,6 +5598,40 @@ checksum = "51743d3e274e2b18df81c4dc6caf8a5b8e15dbe799e0dca05c7617380094e884"
 
 [[package]]
 name = "reqwest"
+version = "0.12.28"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eddd3ca559203180a307f12d114c268abf583f59b03cb906fd0b3ff8646c1147"
+dependencies = [
+ "base64 0.22.1",
+ "bytes",
+ "futures-channel",
+ "futures-core",
+ "futures-util",
+ "http 1.4.2",
+ "http-body",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "js-sys",
+ "log",
+ "percent-encoding",
+ "pin-project-lite",
+ "serde",
+ "serde_json",
+ "serde_urlencoded",
+ "sync_wrapper",
+ "tokio",
+ "tower",
+ "tower-http",
+ "tower-service",
+ "url",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
+name = "reqwest"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "04e9018c9d814e5f30cc16a0f03271aeab3571e609612d9fe78c1aa8d11c2f62"
@@ -5658,7 +5693,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "http 1.4.2",
- "reqwest",
+ "reqwest 0.13.1",
  "thiserror 2.0.19",
  "tower-service",
 ]
@@ -5671,7 +5706,7 @@ checksum = "9dcdd7bc47db7ba0b18b58ebbfba6449c266d0334175eaf5e2219ac4c3a047df"
 dependencies = [
  "async-trait",
  "http 1.4.2",
- "reqwest",
+ "reqwest 0.13.1",
  "reqwest-middleware",
 ]
 
@@ -5687,7 +5722,7 @@ dependencies = [
  "getrandom 0.2.17",
  "http 1.4.2",
  "hyper",
- "reqwest",
+ "reqwest 0.13.1",
  "reqwest-middleware",
  "retry-policies",
  "thiserror 2.0.19",
@@ -7478,7 +7513,7 @@ dependencies = [
  "procfs 0.18.0",
  "prometheus",
  "regex-lite",
- "reqwest",
+ "reqwest 0.13.1",
  "serde",
  "serde_json",
  "shadow-rs",
@@ -8262,7 +8297,7 @@ dependencies = [
  "mixtrics",
  "moka",
  "prometheus",
- "reqwest",
+ "reqwest 0.13.1",
  "serde",
  "shadow-rs",
  "tokio",
@@ -8285,7 +8320,7 @@ dependencies = [
  "http-content-range",
  "log",
  "multer",
- "reqwest",
+ "reqwest 0.13.1",
  "reqwest-leaky-bucket",
  "reqwest-middleware",
  "reqwest-retry",

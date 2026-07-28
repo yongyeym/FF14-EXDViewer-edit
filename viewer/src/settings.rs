@@ -401,4 +401,15 @@ pub enum SchemaLocation {
 pub struct BackendConfig {
     pub location: InstallLocation,
     pub schema: SchemaLocation,
+    #[serde(default = "default_exdschema_url")]
+    pub exdschema_url: Option<String>,
+    #[serde(default = "default_hca_url")]
+    pub hca_url: Option<String>,
+}
+
+fn default_exdschema_url() -> Option<String> {
+    Some(crate::downloader::DEFAULT_EXDSCHEMA_URL.to_string())
+}
+fn default_hca_url() -> Option<String> {
+    Some(crate::downloader::DEFAULT_HCA_DECODER_URL.to_string())
 }
