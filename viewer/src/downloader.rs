@@ -151,7 +151,12 @@ fn download_exdschema_impl(
                 .bytes()
                 .map_err(|e| format!("读取 {name} 失败: {e}"))?;
 
-            let file_path = dest_dir.join(name);
+            // Use the entry's path (relative path like '.github/columns.yml') or name as fallback
+            let save_name = entry["path"].as_str().unwrap_or(name);
+            let file_path = dest_dir.join(save_name);
+            if let Some(parent) = file_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
             std::fs::write(&file_path, &bytes)
                 .map_err(|e| format!("保存 {name} 失败: {e}"))?;
         }
