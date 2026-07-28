@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use crate::excel::provider::ExcelHeader;
+use crate::excel::provider::ExcelProvider;
 use crate::sheet::cell::draw_icon;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -325,6 +325,7 @@ pub fn draw_diff_table(diff: &DiffState, ui: &mut egui::Ui, context: &crate::she
     let total_cols = 2 + col_count; // Diff + Row + data columns
 
     let id = egui::Id::new("diff_egui_table");
+    let mut modal_icon_id: Option<u32> = None;
     ui.push_id(id, |ui| {
         let table = egui_table::Table::new()
             .num_rows(rows.len() as u64)
@@ -337,7 +338,31 @@ pub fn draw_diff_table(diff: &DiffState, ui: &mut egui::Ui, context: &crate::she
             col_meta: &col_meta,
             icon_col_names: &icon_col_names,
             context,
+            modal_icon_id: &mut modal_icon_id,
         });
+
+        // Icon preview modal
+        if let Some(icon_id) = modal_icon_id.take() {
+            let ctx = context.global();
+            let sg = ctx.backend().excel().clone();
+            let icon_mgr = &ctx.icon_manager();
+            egui::Modal::new(egui::Id::new("diff_icon_modal")).show(ui.ctx(), |ui| {
+                let snapshot = icon_mgr.get_or_insert_icon(icon_id, true, ui.ctx(), move || {
+                    let sg = sg.clone();
+                    crate::utils::TrackedPromise::spawn_local(
+                        async move { sg.get_icon(icon_id, true).await }
+                    )
+                });
+                if let crate::utils::ManagedIcon::Loaded(source) = snapshot {
+                    ui.add(egui::Image::new(source).fit_to_exact_size(egui::vec2(400.0, 400.0)));
+                } else {
+                    ui.label("加载中...");
+                }
+                if ui.button("关闭").clicked() {
+                    ui.close();
+                }
+            });
+        }
     });
     CellResponse::None
 }
@@ -347,6 +372,7 @@ struct DiffTableDelegate<'a> {
     col_meta: &'a [(String, String)],
     icon_col_names: &'a std::collections::HashSet<String>,
     context: &'a crate::sheet::TableContext,
+    modal_icon_id: &'a mut Option<u32>,
 }
 
 impl egui_table::TableDelegate for DiffTableDelegate<'_> {
@@ -440,9 +466,12 @@ impl egui_table::TableDelegate for DiffTableDelegate<'_> {
                     let col_name = &self.col_meta[ci].0;
                     if self.icon_col_names.contains(col_name) {
                         if let Ok(id) = diff_row.cells[ci].parse::<u32>() {
-                            let resp = { use crate::excel::provider::ExcelHeader; draw_icon(self.context.global(), ui, id, self.context.sheet().name(), col_name) };
+                            let resp = {
+                                use crate::excel::provider::ExcelHeader;
+                                draw_icon(self.context.global(), ui, id, self.context.sheet().name(), col_name)
+                            };
                             if resp.clicked() {
-                                crate::settings::ICON_SAVE_REQUEST.set(ui.ctx(), (id, col_name.to_string(), self.context.sheet().name().to_string(), false));
+                                *self.modal_icon_id = Some(id);
                             }
                             return;
                         }

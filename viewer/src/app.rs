@@ -568,6 +568,28 @@ impl App {
                         }
                     });
 
+                    // Download menu in top bar
+                    if self.backend.is_some() {
+                        ui.menu_button("下载", |ui| {
+                            if ui.button("EXDSchema").clicked() {
+                                let url = crate::config_file::load_backend_config()
+                                    .and_then(|c| c.exdschema_url)
+                                    .unwrap_or_else(|| crate::downloader::DEFAULT_EXDSCHEMA_URL.to_string());
+                                let status = self.download_exdschema_status.clone();
+                                crate::downloader::start_download_exdschema(&url, status);
+                                ui.close();
+                            }
+                            if ui.button("HCADecoder").clicked() {
+                                let url = crate::config_file::load_backend_config()
+                                    .and_then(|c| c.hca_url)
+                                    .unwrap_or_else(|| crate::downloader::DEFAULT_HCA_DECODER_URL.to_string());
+                                let status = self.download_hca_status.clone();
+                                crate::downloader::start_download_hca(&url, status);
+                                ui.close();
+                            }
+                        });
+                    }
+
                     // Export menu in top bar
                     if self.backend.is_some() {
                         ui.menu_button("导出", |ui| {
