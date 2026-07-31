@@ -2497,7 +2497,12 @@ impl App {
 
         if let Some((name, data)) = cjk {
             fonts.font_data.insert(name.clone(), data);
-            proportional.push(name);
+            // 中文字体同时注册到 Proportional 与 Monospace 字体族，
+            // 否则日志窗口(egui_logger用monospace渲染)中文显示为"口"
+            let proportional = fonts.families.entry(FontFamily::Proportional).or_default();
+            proportional.push(name.clone());
+            let monospace = fonts.families.entry(FontFamily::Monospace).or_default();
+            monospace.push(name);
         }
 
         ctx.set_fonts(fonts);
