@@ -16,6 +16,8 @@ pub struct DiffState {
     pub diff_rows: Vec<DiffRow>,
     pub columns: Vec<String>,
     pub modal_icon_id: Option<u32>,
+    /// 发起对比时所在的数据表名（切换数据表时自动取消对比）
+    pub sheet: String,
 }
 
 #[derive(Clone)]
@@ -38,6 +40,7 @@ impl DiffState {
             diff_rows: Vec::new(),
             columns: Vec::new(),
             modal_icon_id: None,
+            sheet: String::new(),
         }
     }
 }

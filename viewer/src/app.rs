@@ -157,7 +157,7 @@ impl CjkFont {
 }
 
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct ExportProgress {
     pub active: bool,
     pub title: String,
@@ -166,6 +166,23 @@ pub struct ExportProgress {
     pub current_name: String,
     pub done: bool,
     pub error: Option<String>,
+    /// 完成时刻（用于成功后自动关闭窗口计时）
+    pub done_at: Option<std::time::Instant>,
+}
+
+impl Default for ExportProgress {
+    fn default() -> Self {
+        Self {
+            active: false,
+            title: String::new(),
+            current: 0,
+            total: 0,
+            current_name: String::new(),
+            done: false,
+            error: None,
+            done_at: None,
+        }
+    }
 }
 
 pub type SharedExportProgress = std::sync::Arc<std::sync::Mutex<Option<ExportProgress>>>;
@@ -1289,6 +1306,7 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                                     diff_rows: Vec::new(),
                                     columns: Vec::new(),
                                     modal_icon_id: None,
+                                    sheet: table.context().sheet().name().to_string(),
                                 };
                             }
 
@@ -1404,38 +1422,68 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                 {
                     let ep = self.export_progress.lock().unwrap().clone();
                     if let Some(ep) = ep {
-                        let mut show = true;
-                        egui::Window::new("导出进度").id("export_progress".into())
-                            .open(&mut show)
-                            .show(ctx, |ui| {
-                                ui.label(ep.title.clone());
-                                if ep.total > 0 {
-                                    let frac = ep.current as f32 / ep.total as f32;
-                                    ui.add(
-                                        egui::ProgressBar::new(frac)
-                                            .show_percentage()
-                                            .text(format!("{}/{}", ep.current, ep.total)),
-                                    );
-                                }
-                                if !ep.current_name.is_empty() {
-                                    ui.label(format!("当前: {}", ep.current_name));
-                                }
-                                if ep.done {
-                                    ui.label("已完成");
-                                    if ui.button("关闭").clicked() {
-                                        *self.export_progress.lock().unwrap() = None;
-                                    }
-                                } else if let Some(err) = &ep.error {
-                                    ui.colored_label(egui::Color32::RED, err);
-                                    if ui.button("关闭").clicked() {
-                                        *self.export_progress.lock().unwrap() = None;
+                        // 无错误完成时3秒后自动关闭
+                        if ep.done && ep.error.is_none() {
+                            let mut auto_close = false;
+                            {
+                                let mut lock = self.export_progress.lock().unwrap();
+                                if let Some(p) = lock.as_mut() {
+                                    match p.done_at {
+                                        Some(t) => {
+                                            if t.elapsed().as_secs_f32() >= 3.0 {
+                                                auto_close = true;
+                                            }
+                                        }
+                                        None => p.done_at = Some(std::time::Instant::now()),
                                     }
                                 }
-                            });
+                            }
+                            if auto_close {
+                                *self.export_progress.lock().unwrap() = None;
+                            }
+                        }
+                        let ep2 = self.export_progress.lock().unwrap().clone();
+                        if let Some(ep) = ep2 {
+                            let mut show = true;
+                            egui::Window::new("导出进度").id("export_progress".into())
+                                .open(&mut show)
+                                .show(ctx, |ui| {
+                                    ui.label(ep.title.clone());
+                                    if ep.total > 0 {
+                                        let frac = ep.current as f32 / ep.total as f32;
+                                        ui.add(
+                                            egui::ProgressBar::new(frac)
+                                                .show_percentage()
+                                                .text(format!("{}/{}", ep.current, ep.total)),
+                                        );
+                                    }
+                                    if !ep.current_name.is_empty() {
+                                        ui.label(format!("当前: {}", ep.current_name));
+                                    }
+                                    if ep.done {
+                                        ui.label("已完成");
+                                        if ui.button("关闭").clicked() {
+                                            *self.export_progress.lock().unwrap() = None;
+                                        }
+                                    } else if let Some(err) = &ep.error {
+                                        ui.colored_label(egui::Color32::RED, err);
+                                        if ui.button("关闭").clicked() {
+                                            *self.export_progress.lock().unwrap() = None;
+                                        }
+                                    }
+                                });
+                        }
                     }
                 }
 
-let sheet_name = table.context().sheet().name().to_string();
+                let sheet_name = table.context().sheet().name().to_string();
+                // 切换数据表时自动取消Diff对比
+                if self.diff_state.active && self.diff_state.sheet != sheet_name {
+                    self.diff_state.active = false;
+                    self.diff_state.status = "idle".into();
+                    self.diff_state.diff_rows.clear();
+                    self.diff_state.columns.clear();
+                }
                 if let Some(action) = crate::diff::draw_diff_window(
                     &mut self.diff_state, ui, &sheet_name, &self.diff_result,
                 ) {
@@ -2064,6 +2112,7 @@ let sheet_name = table.context().sheet().name().to_string();
             current_name: String::new(),
             done: false,
             error: None,
+            done_at: None,
         });
 
         self.export_promise = Some(TrackedPromise::spawn_local(async move {
@@ -2296,6 +2345,7 @@ let sheet_name = table.context().sheet().name().to_string();
                 current_name: String::new(),
                 done: false,
                 error: None,
+                done_at: None,
             });
         }
 
@@ -2419,6 +2469,7 @@ let sheet_name = table.context().sheet().name().to_string();
             current_name: String::new(),
             done: false,
             error: None,
+            done_at: None,
         });
 
         self.export_promise = Some(TrackedPromise::spawn_local(async move {
