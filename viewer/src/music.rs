@@ -736,9 +736,6 @@ impl MusicPlayer {
                     if ui.button("导出当前").clicked() {
                         export = Some(MusicEvent::ExportCurrent);
                     }
-                    if ui.button("导出全部").clicked() {
-                        export = Some(MusicEvent::ExportAll);
-                    }
                 });
                 if let Some(ev) = export {
                     export_event = Some(ev);

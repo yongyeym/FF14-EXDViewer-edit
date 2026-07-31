@@ -1305,24 +1305,6 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                                         ));
                                         ui.close();
                                     }
-                                    ui.separator();
-                                    if ui.button("导出全部CSV").clicked() {
-                                        export_request = Some(ExportAction::All(true));
-                                        ui.close();
-                                    }
-                                    if ui.button("导出全部CSV源文件").clicked() {
-                                        export_request = Some(ExportAction::All(false));
-                                        ui.close();
-                                    }
-                                    ui.separator();
-                                    if ui.button("导出收藏的CSV").clicked() {
-                                        export_request = Some(ExportAction::Favorites(true));
-                                        ui.close();
-                                    }
-                                    if ui.button("导出收藏的CSV源文件").clicked() {
-                                        export_request = Some(ExportAction::Favorites(false));
-                                        ui.close();
-                                    }
                                 });
                             });
 
