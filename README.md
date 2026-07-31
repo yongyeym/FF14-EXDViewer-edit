@@ -1,26 +1,26 @@
 # FF14 EXDViewer edit
 
-> 基于 [EXDViewer](https://github.com/WorkingRobot/EXDViewer) 二次开发的中文本地化桌面工具，用于浏览与对比《最终幻想14》的游戏数据表（Excel 文件）。
+> 基于 \[EXDViewer](https://github.com/WorkingRobot/EXDViewer) 二次开发的中文本地化桌面工具，用于浏览、对比和导出游戏《最终幻想14》（FF14）的游戏数据表和音乐。
 
 ## 项目简介
 
-FF14 EXDViewer edit 是一个使用 **Rust + egui** 构建的桌面应用程序，帮助 FF14 玩家、Mod 制作者与数据挖掘爱好者快速浏览游戏内部数据表（如 `Item`、`Action`、`Quest` 等），并提供了原生 EXDViewer 没有的增强能力：
+FF14 EXDViewer edit 是一个使用 **Rust + egui** 构建的桌面应用程序，帮助 FF14 玩家与数据挖掘爱好者快速浏览游戏内部数据表，提供了原生 EXDViewer 没有的增强能力：
 
-- **数据版本对比（Diff）**：对比两个游戏版本导出 CSV 的数据差异，精确到行与单元格，并支持图标渲染。
-- **版本追踪**：自动记录各游戏版本的数据表/音乐列表，一键筛选"仅显示新增项"。
-- **音乐转码**：内置 HCA 解码工具，导出音频后自动转换为 WAV。
-- **一键下载**：从 GitHub 下载 EXDSchema 与 HCADecoder 工具，无需手动配置。
+* **数据版本对比（Diff）**：对比两个游戏版本导出 CSV 的数据差异，精确到行与单元格，并支持图标渲染。
+* **版本追踪**：自动记录各游戏版本的数据表/音乐列表，一键筛选"仅显示新增项"。
+* **游戏音乐**：支持导出音乐，并使用HCA 解码工具将游戏中部分.hca格式加密音乐导出为.wav格式。
+* **下载依赖**：提供从 GitHub 下载 EXDSchema 与 HCADecoder 工具的功能，并存放到程序目录下tools文件夹内；由于EXDSchema文件众多，程序提供的下载功能需要按文件依次下载，容易中途下载失败，推荐使用git clone --recurse-submodules https://github.com/xivdev/EXDSchema.git或zip包下载方式手动下载。
 
 ## 功能使用说明
 
-### 1. 数据表浏览
+### 1\. 数据表浏览
 
-- 通过左侧面板选择数据表（支持筛选与收藏）。
-- 顶部工具栏支持：筛选（等于/包含/复杂表达式）、不区分大小写、启用可见列。
-- 图片列（Icon 类型）以缩略图显示，点击图片可打开大图预览；右键菜单支持「复制原始值」「复制图片」「保存此图片」。
-- 单元格右键可复制文本内容。
+* 通过左侧面板选择数据表（支持筛选与收藏）。
+* 顶部工具栏支持：筛选（等于/包含/复杂表达式）、不区分大小写、启用可见列。
+* 图片列（Icon 类型）以缩略图显示，点击图片可打开大图预览；右键菜单支持「复制原始值」「复制图片」「保存此图片」。
+* 单元格右键可复制文本内容。
 
-### 2. 版本 Diff 对比
+### 2\. 版本 Diff 对比
 
 1. 先通过「导出」菜单导出 CSV 文件（默认保存到 `export/data/{版本号}/` 目录）。
 2. 点击工具栏「版本Diff」按钮，打开对比窗口。
@@ -29,38 +29,38 @@ FF14 EXDViewer edit 是一个使用 **Rust + egui** 构建的桌面应用程序�
 
 > 提示：Diff 对比会自动忽略大小写差异与数值科学计数法格式差异（如 `1.84684e+11` 与 `184683661463` 视为相等）。
 
-### 3. 仅显示新增项
+### 3\. 仅显示新增项
 
-- 数据表页面与音乐页面均提供「仅显示新增项」开关（🔍）。
-- 程序会自动记录每个游戏版本的表单/音乐列表，跨版本对比后标记新增内容。
+* 数据表页面与音乐页面均提供「仅显示新增项」开关（🔍）。
+* 程序会自动记录最近两个游戏版本的表单/音乐列表，对比后标记新增内容。
 
-### 4. 音频导出与 HCA 转码
+### 4\. 音频导出与 HCA 转码
 
-- 音乐页面支持导出所选音频（HCA 格式）。
-- 导出后程序会自动调用 `tools/hca.exe` 在相同目录生成 `.wav` 文件。
-- 若 `tools/hca.exe` 不存在，可通过「下载」菜单的「下载HCADecoder」自动获取。
+* 音乐页面支持导出当前所选音频或一键导出全部音频。
+* hca加密格式音频在导出后程序会自动调用 `tools/hca.exe` 在相同目录生成 `.wav` 文件。
+* 若 `tools/hca.exe` 不存在则不会进行hca音频解码，不影响程序导出功能，可通过「下载」菜单的「HCADecoder」进行下载或手动下载并放到程序tools文件夹内。
 
-### 5. 下载功能
+### 5\. 下载功能
 
 主菜单栏的「下载」菜单提供：
 
-| 菜单项 | 说明 | 保存位置 |
-|--------|------|----------|
-| **下载EXDSchema** | 下载 `xivdev/EXDSchema` 仓库 `schemas/latest` 的全部 yaml 文件 | `tools/EXDSchema/` |
-| **下载HCADecoder** | 下载 `Nyagamon/HCADecoder` 最新 Release 压缩包，解压出 `hca.exe` | `tools/` |
+|菜单项|说明|保存位置|
+|-|-|-|
+|**下载EXDSchema**|下载 `xivdev/EXDSchema` 仓库 `schemas/latest` 的全部 yaml 文件|`tools/EXDSchema/`|
+|**下载HCADecoder**|下载 `Nyagamon/HCADecoder` 最新 Release 压缩包，解压出 `hca.exe`|`tools/`|
 
-- 下载 URL 保存在 `config/settings.json` 中（字段 `exdschema_url` / `hca_url`），可手动修改；未配置时使用代码内置默认值。
-- 下载在后台线程执行，窗口显示进度与结果。
+* 下载 URL 保存在 `config/settings.json` 中（字段 `exdschema\_url` / `hca\_url`），可手动修改；未配置时使用代码内置默认值。
+* 下载在后台线程执行，窗口显示进度与结果。
 
-### 6. 日志与配置
+### 6\. 日志与配置
 
-- 「视图设置」菜单可打开 Log 日志窗口，支持等级过滤（ERROR/WARN/INFO/DEBUG）、正则搜索、复制日志。
-- 所有配置文件均存放于 exe 同目录下的 `config/` 文件夹（JSON 格式，可读可改）。
+* 「视图设置」菜单可打开 Log 日志窗口，支持等级过滤（ERROR/WARN/INFO/DEBUG）、正则搜索、复制日志。
+* 所有配置文件均存放于 exe 同目录下的 `config/` 文件夹（JSON 格式）。
 
 ## 目录结构
 
 ```
-FF14_EXDViewer_edit/
+FF14\_EXDViewer\_edit/
 ├── Cargo.toml              # 工作区配置
 ├── Dockerfile              # Web 版 Docker 部署
 ├── deps/                   # 本地依赖（ironworks 等）
@@ -75,12 +75,12 @@ FF14_EXDViewer_edit/
 │       ├── backend.rs      # 后端数据提供者（游戏版本等）
 │       ├── downloader.rs   # EXDSchema / HCADecoder 下载模块
 │       ├── diff.rs         # 版本对比模块（CSV 解析、差异计算、表格渲染）
-│       ├── list_tracker.rs # 版本化列表存储与新增项对比
+│       ├── list\_tracker.rs # 版本化列表存储与新增项对比
 │       ├── music.rs        # 音乐播放器（含新增项筛选）
 │       ├── sheet/          # 数据表渲染（表格、单元格、图标）
 │       ├── excel/          # 游戏数据访问（SqPack 解析）
 │       ├── settings.rs     # 设置项与配置文件结构
-│       ├── config_file.rs  # settings.json 读写
+│       ├── config\_file.rs  # settings.json 读写
 │       └── utils/          # 图标管理、Promise 工具等
 └── README.md               # 本文件
 ```
@@ -89,33 +89,33 @@ FF14_EXDViewer_edit/
 
 ### 编程语言
 
-- **Rust**（≥ 1.97）
-- 少量 HTML/JS（Web 版部署）
+* **Rust**（≥ 1.97）
+* 少量 HTML/JS（Web 版部署）
 
 ### 技术架构
 
-- **UI 框架**：[egui](https://github.com/emilk/egui)（即时模式 GUI）+ [eframe](https://github.com/emilk/egui/tree/master/crates/eframe)
-- **表格渲染**：`egui_table`（虚拟化表格）、`egui_extras`
-- **游戏数据读取**：[ironworks](https://github.com/ackwell/ironworks)（本地 SqPack 解析）
-- **CSV 处理**：`csv`
-- **网络请求**：`reqwest`（下载功能）
-- **压缩解压**：`zip`
+* **UI 框架**：[egui](https://github.com/emilk/egui)（即时模式 GUI）+ [eframe](https://github.com/emilk/egui/tree/master/crates/eframe)
+* **表格渲染**：`egui\_table`（虚拟化表格）、`egui\_extras`
+* **游戏数据读取**：[ironworks](https://github.com/ackwell/ironworks)（本地 SqPack 解析）
+* **CSV 处理**：`csv`
+* **网络请求**：`reqwest`（下载功能）
+* **压缩解压**：`zip`
 
 ### 参考项目
 
-| 项目 | 地址 | 用途 |
-|------|------|------|
-| EXDViewer | https://github.com/WorkingRobot/EXDViewer | 本项目的基础（V1.7.0 版本） |
-| EXDSchema | https://github.com/xivdev/EXDSchema | 数据结构定义（YAML），支持动态编辑 |
-| ironworks | https://github.com/ackwell/ironworks | Rust 游戏数据解析库 |
-| Lumina | https://github.com/NotAdam/Lumina | C# 游戏数据解析库（社区参考） |
-| XIVAPI | https://xivapi.com/ | REST API 数据服务 |
+|项目|地址|用途|
+|-|-|-|
+|EXDViewer|https://github.com/WorkingRobot/EXDViewer|本项目的基础（V1.7.0 版本）|
+|EXDSchema|https://github.com/xivdev/EXDSchema|数据结构定义（YAML），支持动态编辑|
+|ironworks|https://github.com/ackwell/ironworks|Rust 游戏数据解析库|
+|Lumina|https://github.com/NotAdam/Lumina|C# 游戏数据解析库（社区参考）|
+|XIVAPI|https://xivapi.com/|REST API 数据服务|
 
 ### 第三方工具
 
-| 工具 | 来源 | 用途 |
-|------|------|------|
-| HCADecoder | https://github.com/Nyagamon/HCADecoder | HCA → WAV 音频解码 |
+|工具|来源|用途|
+|-|-|-|
+|HCADecoder|https://github.com/Nyagamon/HCADecoder|HCA → WAV 音频解码|
 
 ## 从源码构建
 
@@ -127,32 +127,29 @@ cargo build --release --bin ff14-exdviewer-edit
 
 构建依赖：Rust 工具链（MSVC）、NASM、Windows 10+。
 
----
+\---
 
 <details>
 <summary><b>以下内容为EXDViewer项目V1.7.0版本原始ReadMe.md文档（文本已经AI翻译）</b></summary>
 
-# FF14_EXDViewer_edit
+# EXDViewer
 
 <img align="right" src="https://github.com/WorkingRobot/EXDViewer/blob/main/viewer/assets/icon.png?raw=true" width="20%">
 
-[![Native Build](https://img.shields.io/github/actions/workflow/status/WorkingRobot/EXDViewer/build-native.yml?style=for-the-badge&label=Native%20Build
-)](https://github.com/WorkingRobot/EXDViewer/releases)
-[![Web Build](https://img.shields.io/github/actions/workflow/status/WorkingRobot/EXDViewer/build-web.yml?style=for-the-badge&label=Web%20Build
-)](https://github.com/WorkingRobot/EXDViewer/pkgs/container/exdviewer-web)
-[![License](https://img.shields.io/github/license/WorkingRobot/EXDViewer?style=for-the-badge&)](/LICENSE)
-[![FFXIV Version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fexd.camora.dev%2Fapi%2F4e9a232b%2Fversions&query=latest&style=for-the-badge&label=Latest%20XIV%20Version
-)](https://thaliak.xiv.dev/repository/4e9a232b)
+[!\[Native Build](https://img.shields.io/github/actions/workflow/status/WorkingRobot/EXDViewer/build-native.yml?style=for-the-badge\&label=Native%20Build)](https://github.com/WorkingRobot/EXDViewer/releases)
+[!\[Web Build](https://img.shields.io/github/actions/workflow/status/WorkingRobot/EXDViewer/build-web.yml?style=for-the-badge\&label=Web%20Build)](https://github.com/WorkingRobot/EXDViewer/pkgs/container/exdviewer-web)
+[!\[License](https://img.shields.io/github/license/WorkingRobot/EXDViewer?style=for-the-badge\&)](/LICENSE)
+[!\[FFXIV Version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fexd.camora.dev%2Fapi%2F4e9a232b%2Fversions\&query=latest\&style=for-the-badge\&label=Latest%20XIV%20Version)](https://thaliak.xiv.dev/repository/4e9a232b)
 
 EXDViewer 是一个现代化、快速且用户友好的工具，用于浏览《最终幻想14》的 [Excel 文件](https://xiv.dev/game-data/file-formats/excel)。Excel 文件是结构化的数据表，存储了各种游戏内信息，例如物品属性、NPC 数据等。
 
 ## 功能特性
 
-- **Web 版和原生桌面版：** 立即在 [exd.camora.dev](https://exd.camora.dev) 使用 Web 版，或下载[原生桌面版](https://github.com/WorkingRobot/EXDViewer/releases)。
-- **轻松部署：** 通过 Docker 自行托管 Web 实例。
-- **高性能：** 高效处理所有数据表，即使是 `Item`、`Action` 或 `Quest` 这样的大型表也能流畅运行。
-- **EXDSchema 支持：** 与 [EXDSchema](https://github.com/xivdev/EXDSchema) 深度集成，支持增强的数据浏览和动态编辑器内数据结构定义编辑。
-- **高级筛选：** 支持简单、模糊和复杂的筛选方式，快速定位特定数据。
+* **Web 版和原生桌面版：** 立即在 [exd.camora.dev](https://exd.camora.dev) 使用 Web 版，或下载[原生桌面版](https://github.com/WorkingRobot/EXDViewer/releases)。
+* **轻松部署：** 通过 Docker 自行托管 Web 实例。
+* **高性能：** 高效处理所有数据表，即使是 `Item`、`Action` 或 `Quest` 这样的大型表也能流畅运行。
+* **EXDSchema 支持：** 与 [EXDSchema](https://github.com/xivdev/EXDSchema) 深度集成，支持增强的数据浏览和动态编辑器内数据结构定义编辑。
+* **高级筛选：** 支持简单、模糊和复杂的筛选方式，快速定位特定数据。
 
 ## 快速开始
 
@@ -190,7 +187,8 @@ FFXIV 的内部开发流程会为每个数据表生成头文件，这些文件�
 ## 从源码构建
 
 1. 克隆仓库：
-    ```bash
+
+&#x20;   ```bash
     git clone https://github.com/WorkingRobot/EXDViewer.git
     cd EXDViewer
     ```
@@ -198,25 +196,30 @@ FFXIV 的内部开发流程会为每个数据表生成头文件，这些文件�
 ### 原生桌面版
 
 2. 构建项目：
-    ```bash
+
+&#x20;   ```bash
     cargo build --bin viewer --release
     ```
 
 ### Web 版
 
 2. 安装 trunk：
-    ```bash
+
+&#x20;   ```bash
     cargo install --locked trunk
     ```
-    或参考[安装说明](https://trunkrs.dev/guide/getting-started/installation.html)。在继续之前，请确保 `trunk` 已安装且位于 PATH 环境变量中。
+
+   或参考[安装说明](https://trunkrs.dev/guide/getting-started/installation.html)。在继续之前，请确保 `trunk` 已安装且位于 PATH 环境变量中。
 
 3. 如果不需要 API 服务器，可以只构建 viewer 二进制文件以节省时间：
-    ```bash
+
+&#x20;   ```bash
     trunk serve --release --config viewer
     ```
 
 4. 如果需要 API 服务器，构建 web 二进制文件（这将同时在内部构建 viewer 二进制文件）：
-    ```bash
+
+&#x20;   ```bash
     cargo run --bin web --release
     ```
 
@@ -225,3 +228,4 @@ FFXIV 的内部开发流程会为每个数据表生成头文件，这些文件�
 欢迎提交贡献、Bug 报告和功能请求！请提交 [issue](https://github.com/WorkingRobot/EXDViewer/issues) 或 [pull request](https://github.com/WorkingRobot/EXDViewer/pulls)。
 
 </details>
+
