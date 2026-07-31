@@ -22,7 +22,9 @@ fn main() -> eframe::Result {
         // 只对本项目 crate 开启 debug，第三方 crate（winit/egui/tracing 等）保持 info 以上，
         // 避免 winit::Window::scale_factor 等 tracing span 日志每帧无限刷屏
         env_logger::Builder::from_env(
-            env_logger::Env::new().default_filter_or("info,ff14_exdviewer_edit=debug"),
+            env_logger::Env::new().default_filter_or(
+                "info,ff14_exdviewer_edit=debug,egui::context=error",
+            ),
         )
         .build(),
         egui_logger::builder()
