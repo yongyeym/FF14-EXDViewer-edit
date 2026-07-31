@@ -1,6 +1,6 @@
 # FF14 EXDViewer edit
 
-> 基于 \[EXDViewer](https://github.com/WorkingRobot/EXDViewer) 二次开发的中文本地化桌面工具，用于浏览、对比和导出游戏《最终幻想14》（FF14）的游戏数据表和音乐。
+> 基于 \[EXDViewer](https://github.com/WorkingRobot/EXDViewer) ，使用AI进行二次开发的中文本地化桌面工具，用于浏览、对比和导出游戏《最终幻想14》（FF14）的游戏数据表和音乐。
 
 ## 项目简介
 
