@@ -233,6 +233,12 @@ pub struct App {
     // ── Download ──
     download_exdschema_status: crate::downloader::SharedStatus,
     download_hca_status: crate::downloader::SharedStatus,
+    // ── 删除CSV版本窗口 ──
+    delete_csv_open: bool,
+    delete_csv_versions: Vec<String>,
+    delete_csv_selected: std::collections::HashSet<String>,
+    delete_csv_confirming: bool,
+    delete_csv_done_at: Option<std::time::Instant>,
 }
 
 fn create_router(ctx: egui::Context) -> Result<Router<App>> {
@@ -703,6 +709,20 @@ impl App {
                                 if let Some(backend) = self.backend.clone() {
                                     self.command_export_music(&backend, false);
                                 }
+                                ui.close();
+                            }
+                            ui.separator();
+                            if ui.button("删除指定版本CSV文件").clicked() {
+                                self.delete_csv_versions = crate::diff::find_version_folders();
+                                // 默认选中除最新两个版本外的全部文件夹
+                                self.delete_csv_selected = self.delete_csv_versions
+                                    .iter()
+                                    .take(self.delete_csv_versions.len().saturating_sub(2))
+                                    .cloned()
+                                    .collect();
+                                self.delete_csv_confirming = false;
+                                self.delete_csv_done_at = None;
+                                self.delete_csv_open = true;
                                 ui.close();
                             }
                         });
@@ -1418,7 +1438,126 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                     });
                 }
 
-                // ── Export Progress Window ──
+                // ── 删除CSV版本窗口 ──
+                if self.delete_csv_open {
+                    // 完成后5秒自动关闭
+                    if let Some(t) = self.delete_csv_done_at {
+                        if t.elapsed().as_secs_f32() >= 5.0 {
+                            self.delete_csv_open = false;
+                            self.delete_csv_done_at = None;
+                            self.delete_csv_confirming = false;
+                        }
+                    }
+                    let mut close_window = false;
+                    let mut trigger_confirm = false;
+                    let mut trigger_delete = false;
+                    egui::Window::new("勾选需要删除的CSV文件版本号")
+                        .id("delete_csv_window".into())
+                        .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                        .collapsible(false)
+                        .resizable(false)
+                        .default_size([460.0, 380.0])
+                        .show(ctx, |ui| {
+                            ui.label(
+                                egui::RichText::new("注意：执行删除后无法恢复！")
+                                    .color(egui::Color32::RED)
+                                    .size(13.0),
+                            );
+                            ui.separator();
+                            if let Some(t) = self.delete_csv_done_at {
+                                ui.label(
+                                    egui::RichText::new(
+                                        format!("已完成删除，窗口5秒后自动关闭……（{:.0}秒）", 5.0 - t.elapsed().as_secs_f32().max(0.0)),
+                                    ).color(egui::Color32::GREEN),
+                                );
+                                return;
+                            }
+                            egui::ScrollArea::vertical()
+                                .id_salt("delete_csv_list")
+                                .max_height(220.0)
+                                .show(ui, |ui| {
+                                    let versions = self.delete_csv_versions.clone();
+                                    for v in &versions {
+                                        let mut checked = self.delete_csv_selected.contains(v);
+                                        if ui.checkbox(&mut checked, v).changed() {
+                                            if checked {
+                                                self.delete_csv_selected.insert(v.clone());
+                                            } else {
+                                                self.delete_csv_selected.remove(v);
+                                            }
+                                        }
+                                    }
+                                });
+                            ui.separator();
+                            ui.horizontal_wrapped(|ui| {
+                                // 全选/取消全选
+                                if ui.button("全选").clicked() {
+                                    if self.delete_csv_selected.len() == self.delete_csv_versions.len()
+                                        && !self.delete_csv_versions.is_empty()
+                                    {
+                                        self.delete_csv_selected.clear();
+                                    } else {
+                                        self.delete_csv_selected =
+                                            self.delete_csv_versions.iter().cloned().collect();
+                                    }
+                                }
+                                // 重置为默认选中（除最新两个版本外）
+                                if ui.button("选中除最新两个版本外的CSV").clicked() {
+                                    self.delete_csv_selected = self.delete_csv_versions
+                                        .iter()
+                                        .take(self.delete_csv_versions.len().saturating_sub(2))
+                                        .cloned()
+                                        .collect();
+                                }
+                                if ui.button("关闭").clicked() {
+                                    close_window = true;
+                                }
+                            });
+                            ui.separator();
+                            if ui.button("确定删除选中版本的CSV文件").clicked() {
+                                if self.delete_csv_selected.is_empty() {
+                                    // 无选中则直接提示？这里用弹窗内容提示
+                                    ui.colored_label(egui::Color32::RED, "请先勾选要删除的版本！");
+                                } else {
+                                    trigger_confirm = true;
+                                }
+                            }
+                        });
+
+                    // 二次确认框
+                    if self.delete_csv_confirming {
+                        egui::Modal::new(egui::Id::new("delete_csv_confirm_modal")).show(ctx, |ui| {
+                            ui.heading("是否确定删除勾选版本的全部CSV文件");
+                            ui.label(format!("将删除 {} 个版本文件夹中的全部CSV文件", self.delete_csv_selected.len()));
+                            ui.add_space(8.0);
+                            ui.horizontal(|ui| {
+                                if ui.button("确定").clicked() {
+                                    trigger_delete = true;
+                                }
+                                if ui.button("取消").clicked() {
+                                    self.delete_csv_confirming = false;
+                                }
+                            });
+                        });
+                    }
+
+                    if trigger_confirm {
+                        self.delete_csv_confirming = true;
+                    }
+                    if trigger_delete {
+                        self.delete_csv_confirming = false;
+                        let versions: Vec<String> = self.delete_csv_selected.iter().cloned().collect();
+                        Self::delete_csv_versions_impl(versions);
+                        self.delete_csv_done_at = Some(std::time::Instant::now());
+                    }
+                    if close_window {
+                        self.delete_csv_open = false;
+                        self.delete_csv_done_at = None;
+                        self.delete_csv_confirming = false;
+                    }
+                }
+
+
                 {
                     let ep = self.export_progress.lock().unwrap().clone();
                     if let Some(ep) = ep {
@@ -2307,6 +2446,54 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
         }));
     }
 
+
+    fn execute_delete_csv_versions(&mut self) {
+        let versions: Vec<String> = self.delete_csv_selected.iter().cloned().collect();
+        self.delete_csv_selected.clear();
+        Self::delete_csv_versions_impl(versions);
+    }
+
+    fn delete_csv_versions_impl(versions: Vec<String>) {
+        let export_base = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|p| p.join("export").join("data")))
+            .unwrap_or_else(|| std::path::PathBuf::from("export/data"));
+        let mut deleted_dirs = 0usize;
+        for v in &versions {
+            let dir = export_base.join(v);
+            if !dir.is_dir() {
+                log::warn!("目录不存在，跳过: {}", dir.display());
+                continue;
+            }
+            let mut removed_files = 0usize;
+            if let Ok(entries) = std::fs::read_dir(&dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_file()
+                        && path.extension().map(|e| e.eq_ignore_ascii_case("csv")).unwrap_or(false)
+                    {
+                        match std::fs::remove_file(&path) {
+                            Ok(_) => removed_files += 1,
+                            Err(e) => log::error!("删除文件失败 {}: {e}", path.display()),
+                        }
+                    }
+                }
+            }
+            // 若目录已空则删除目录本身
+            let is_empty = std::fs::read_dir(&dir)
+                .map(|mut d| d.next().is_none())
+                .unwrap_or(false);
+            if is_empty {
+                match std::fs::remove_dir(&dir) {
+                    Ok(_) => deleted_dirs += 1,
+                    Err(e) => log::warn!("删除目录失败 {}: {e}", dir.display()),
+                }
+            }
+            log::info!("已删除版本 {v} 的 {removed_files} 个CSV文件");
+        }
+        log::info!("CSV删除完成，共删除 {deleted_dirs} 个空目录");
+    }
+
     fn command_export_music(&mut self, backend: &Backend, export_current: bool) {
         use ironworks::file::scd::{Codec, SoundContainer};
         use std::io::Cursor;
@@ -2629,6 +2816,13 @@ impl App {
             diff_state: crate::diff::DiffState::new(),
             download_exdschema_status: std::sync::Arc::new(std::sync::Mutex::new(crate::downloader::DownloadStatus::Idle)),
             download_hca_status: std::sync::Arc::new(std::sync::Mutex::new(crate::downloader::DownloadStatus::Idle)),
+
+            // ── 删除CSV版本窗口 ──
+            delete_csv_open: false,
+            delete_csv_versions: Vec::new(),
+            delete_csv_selected: std::collections::HashSet::new(),
+            delete_csv_confirming: false,
+            delete_csv_done_at: None,
         }
     }
 
