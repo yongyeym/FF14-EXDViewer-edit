@@ -156,6 +156,20 @@ impl CjkFont {
     }
 }
 
+
+#[derive(Clone, Default)]
+pub struct ExportProgress {
+    pub active: bool,
+    pub title: String,
+    pub current: usize,
+    pub total: usize,
+    pub current_name: String,
+    pub done: bool,
+    pub error: Option<String>,
+}
+
+pub type SharedExportProgress = std::sync::Arc<std::sync::Mutex<Option<ExportProgress>>>;
+
 pub struct App {
     router: Rc<OnceCell<Router<Self>>>,
     icon_manager: IconManager,
@@ -170,6 +184,7 @@ pub struct App {
     changed_schemas: Option<(ChangedSchemasKey, ConvertibleChangedSchemasPromise)>,
     save_promise: Option<TrackedPromise<()>>,
     export_promise: Option<TrackedPromise<()>>,
+    export_progress: SharedExportProgress,
     /// Promise for loading list diffs (sheets/music) on startup.
     list_promise: Option<TrackedPromise<()>>,
     /// Promise for version diff computation (runs in background).
@@ -1385,6 +1400,41 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                     });
                 }
 
+                // ── Export Progress Window ──
+                {
+                    let ep = self.export_progress.lock().unwrap().clone();
+                    if let Some(ep) = ep {
+                        let mut show = true;
+                        egui::Window::new("导出进度").id("export_progress".into())
+                            .open(&mut show)
+                            .show(ctx, |ui| {
+                                ui.label(ep.title.clone());
+                                if ep.total > 0 {
+                                    let frac = ep.current as f32 / ep.total as f32;
+                                    ui.add(
+                                        egui::ProgressBar::new(frac)
+                                            .show_percentage()
+                                            .text(format!("{}/{}", ep.current, ep.total)),
+                                    );
+                                }
+                                if !ep.current_name.is_empty() {
+                                    ui.label(format!("当前: {}", ep.current_name));
+                                }
+                                if ep.done {
+                                    ui.label("已完成");
+                                    if ui.button("关闭").clicked() {
+                                        *self.export_progress.lock().unwrap() = None;
+                                    }
+                                } else if let Some(err) = &ep.error {
+                                    ui.colored_label(egui::Color32::RED, err);
+                                    if ui.button("关闭").clicked() {
+                                        *self.export_progress.lock().unwrap() = None;
+                                    }
+                                }
+                            });
+                    }
+                }
+
 let sheet_name = table.context().sheet().name().to_string();
                 if let Some(action) = crate::diff::draw_diff_window(
                     &mut self.diff_state, ui, &sheet_name, &self.diff_result,
@@ -2005,9 +2055,26 @@ let sheet_name = table.context().sheet().name().to_string();
         }
         let excel = backend.excel().clone();
 
+        let progress = self.export_progress.clone();
+        *progress.lock().unwrap() = Some(ExportProgress {
+            active: true,
+            title: "导出收藏的CSV".into(),
+            current: 0,
+            total,
+            current_name: String::new(),
+            done: false,
+            error: None,
+        });
+
         self.export_promise = Some(TrackedPromise::spawn_local(async move {
             for (i, sheet_name) in favorite_names.iter().enumerate() {
                 let file_name = format!("{}.csv", sheet_name.replace('/', "_"));
+                {
+                    if let Some(p) = progress.lock().unwrap().as_mut() {
+                        p.current = i + 1;
+                        p.current_name = sheet_name.clone();
+                    }
+                }
                 let out_path = export_dir.join(&file_name);
 
                 match excel.get_sheet(sheet_name, lang).await {
@@ -2046,6 +2113,10 @@ let sheet_name = table.context().sheet().name().to_string();
                 }
             }
             log::info!("收藏CSV导出完成，共 {total} 张数据表");
+            if let Some(p) = progress.lock().unwrap().as_mut() {
+                p.done = true;
+                p.active = false;
+            }
         }));
     }
 
@@ -2215,6 +2286,19 @@ let sheet_name = table.context().sheet().name().to_string();
                 .collect()
         };
 
+        let progress = self.export_progress.clone();
+        if !export_current {
+            *progress.lock().unwrap() = Some(ExportProgress {
+                active: true,
+                title: "导出全部音乐".into(),
+                current: 0,
+                total: tracks_for_export.len(),
+                current_name: String::new(),
+                done: false,
+                error: None,
+            });
+        }
+
         self.export_promise = Some(TrackedPromise::spawn_local(async move {
             let total = tracks_for_export.len();
             for (i, (_, track_path)) in tracks_for_export.iter().enumerate() {
@@ -2224,6 +2308,12 @@ let sheet_name = table.context().sheet().name().to_string();
                     .file_stem()
                     .and_then(|s| s.to_str())
                     .unwrap_or("unknown");
+                {
+                    if let Some(p) = progress.lock().unwrap().as_mut() {
+                        p.current = i + 1;
+                        p.current_name = stem.to_string();
+                    }
+                }
 
                 // Read SCD file and extract the actual audio data with correct extension
                 let result = async {
@@ -2281,6 +2371,10 @@ let sheet_name = table.context().sheet().name().to_string();
             if total > 1 {
                 log::info!("音乐导出完成，共 {total} 首");
             }
+            if let Some(p) = progress.lock().unwrap().as_mut() {
+                p.done = true;
+                p.active = false;
+            }
         }));
     }
 
@@ -2316,9 +2410,26 @@ let sheet_name = table.context().sheet().name().to_string();
         let total = sheets.len();
         let excel = backend.excel().clone();
 
+        let progress = self.export_progress.clone();
+        *progress.lock().unwrap() = Some(ExportProgress {
+            active: true,
+            title: "导出全部CSV".into(),
+            current: 0,
+            total,
+            current_name: String::new(),
+            done: false,
+            error: None,
+        });
+
         self.export_promise = Some(TrackedPromise::spawn_local(async move {
             for (i, sheet_name) in sheets.iter().enumerate() {
                 let file_name = format!("{}.csv", sheet_name.replace('/', "_"));
+                {
+                    if let Some(p) = progress.lock().unwrap().as_mut() {
+                        p.current = i + 1;
+                        p.current_name = sheet_name.clone();
+                    }
+                }
                 let out_path = export_dir.join(&file_name);
 
                 match excel.get_sheet(sheet_name, lang).await {
@@ -2358,6 +2469,10 @@ let sheet_name = table.context().sheet().name().to_string();
                 }
             }
             log::info!("全部CSV导出完成，共 {total} 张数据表");
+            if let Some(p) = progress.lock().unwrap().as_mut() {
+                p.done = true;
+                p.active = false;
+            }
         }));
     }
 
@@ -2441,6 +2556,7 @@ impl App {
             changed_schemas: None,
             save_promise: None,
             export_promise: None,
+            export_progress: std::sync::Arc::new(std::sync::Mutex::new(None)),
             list_promise: None,
             diff_result: std::sync::Arc::new(std::sync::Mutex::new(None)),
             auto_init_promise: None,
