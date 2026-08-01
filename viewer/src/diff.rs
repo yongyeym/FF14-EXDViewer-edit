@@ -292,7 +292,12 @@ pub enum DiffAction {
     Compare { old: String, new: String, sheet: String },
 }
 
-pub fn draw_diff_table(diff: &DiffState, ui: &mut egui::Ui, context: &crate::sheet::TableContext) -> CellResponse {
+pub fn draw_diff_table(
+    diff: &DiffState,
+    ui: &mut egui::Ui,
+    context: &crate::sheet::TableContext,
+    use_layout: bool,
+) -> CellResponse {
     let rows = &diff.diff_rows;
     let cols = &diff.columns;
     let data_col_start = if cols.len() > 1 && cols[1] == "Subrow" { 2 } else { 1 };
@@ -334,14 +339,18 @@ pub fn draw_diff_table(diff: &DiffState, ui: &mut egui::Ui, context: &crate::she
     let sheet_name = context.sheet().name().to_string();
     let layout = crate::column_layout::load_column_layout();
     // (col_meta索引, 中文显示标题)，顺序即展示顺序
-    let visible: Option<Vec<(usize, String)>> = crate::column_layout::get_sheet_columns(&layout, &sheet_name)
-        .map(|names| {
-            names
-                .iter()
-                .filter_map(|(name, title)| col_meta.iter().position(|(n, _)| n == name).map(|i| (i, title.clone())))
-                .collect::<Vec<_>>()
-        })
-        .filter(|v| !v.is_empty());
+    let visible: Option<Vec<(usize, String)>> = if use_layout {
+        crate::column_layout::get_sheet_columns(&layout, &sheet_name)
+            .map(|names| {
+                names
+                    .iter()
+                    .filter_map(|(name, title)| col_meta.iter().position(|(n, _)| n == name).map(|i| (i, title.clone())))
+                    .collect::<Vec<_>>()
+            })
+            .filter(|v| !v.is_empty())
+    } else {
+        None
+    };
 
     let total_cols = 2 + visible.as_ref().map_or(col_count, |v| v.len()); // Diff + Row + data columns
 

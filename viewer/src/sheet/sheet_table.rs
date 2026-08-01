@@ -73,6 +73,12 @@ pub struct SheetTable {
 
 impl SheetTable {
     pub fn new(context: TableContext, ui: &mut egui::Ui) -> Self {
+        Self::with_layout(context, ui, true)
+    }
+
+    /// 创建表格；`use_layout=true` 时应用 column_layout.json 个性化列布局，
+    /// `use_layout=false` 时强制展示完整表格（忽略列布局配置）。
+    pub fn with_layout(context: TableContext, ui: &mut egui::Ui, use_layout: bool) -> Self {
         let sheet = context.sheet();
 
         let unfiltered_row_offsets = Rc::new(RefCell::new(Vec::with_capacity(
@@ -111,16 +117,18 @@ impl SheetTable {
         // 读取个性化列布局配置（config/column_layout.json）
         // 配置存在时：按配置的列顺序渲染，未配置的列隐藏；并忽略“按偏移/按序号”排序设置。
         let sheet_name = ret.context.sheet().name().to_string();
-        let layout = crate::column_layout::load_column_layout();
-        if let Some(cols) = crate::column_layout::get_sheet_columns(&layout, &sheet_name) {
-            let mut offsets = Vec::with_capacity(cols.len());
-            for (name, title) in cols {
-                if let Some(off) = ret.context.find_column_by_name(&name) {
-                    offsets.push((off, title));
+        if use_layout {
+            let layout = crate::column_layout::load_column_layout();
+            if let Some(cols) = crate::column_layout::get_sheet_columns(&layout, &sheet_name) {
+                let mut offsets = Vec::with_capacity(cols.len());
+                for (name, title) in cols {
+                    if let Some(off) = ret.context.find_column_by_name(&name) {
+                        offsets.push((off, title));
+                    }
                 }
-            }
-            if !offsets.is_empty() {
-                ret.column_layout = Some(offsets);
+                if !offsets.is_empty() {
+                    ret.column_layout = Some(offsets);
+                }
             }
         }
 

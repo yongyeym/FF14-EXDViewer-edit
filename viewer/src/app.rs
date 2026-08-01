@@ -233,6 +233,15 @@ pub struct App {
     // ── Download ──
     download_exdschema_status: crate::downloader::SharedStatus,
     download_hca_status: crate::downloader::SharedStatus,
+    // ── 表格展示模式切换 ──
+    /// false=优先使用配置文件个性化展示；true=强制展示完整表格
+    table_layout_full: bool,
+    /// 是否显示二次确认窗口
+    table_layout_confirm: bool,
+    /// 切换中提示（完成后自动关闭）
+    table_layout_switching: bool,
+    /// 切换提示开始时间（用于延时自动关闭）
+    table_layout_switch_start: Option<std::time::Instant>,
     // ── 删除CSV版本窗口 ──
     delete_csv_open: bool,
     delete_csv_versions: Vec<String>,
@@ -1161,7 +1170,7 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                             sheet.and_then(|sheet| {
                                 let schema = editor.as_ref().map(|e| e.get_schema());
                                 if let Ok(schema) = schema {
-                                    Ok(SheetTable::new(
+                                    Ok(SheetTable::with_layout(
                                         TableContext::new(
                                             GlobalContext::new(
                                                 ui.ctx().clone(),
@@ -1173,6 +1182,7 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                                             schema,
                                         ),
                                         ui,
+                                        !self.table_layout_full,
                                     ))
                                 } else {
                                     Err(anyhow::anyhow!("Failed to load schema to create table"))
@@ -1310,6 +1320,30 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                                     SCHEMA_EDITOR_VISIBLE.set(ui.ctx(), visible);
                                 }
                             });
+
+                            // 表格展示模式切换按钮：完整表格 / 个性化配置
+                            {
+                                // 当前表是否配置了个性化展示
+                                let layout = crate::column_layout::load_column_layout();
+                                let has_layout = crate::column_layout::get_sheet_columns(&layout, &sheet_name)
+                                    .map(|cols| !cols.is_empty())
+                                    .unwrap_or(false);
+                                ui.add_enabled_ui(has_layout, |ui| {
+                                    let label = if self.table_layout_full {
+                                        "个性化配置"
+                                    } else {
+                                        "完整表格"
+                                    };
+                                    let hover = if self.table_layout_full {
+                                        format!("当前展示：完整表格（{sheet_name} 未应用列布局配置）")
+                                    } else {
+                                        format!("当前展示：个性化配置（{sheet_name} 仅显示配置的列）")
+                                    };
+                                    if ui.button(label).on_hover_text(hover).clicked() {
+                                        self.table_layout_confirm = true;
+                                    }
+                                });
+                            }
 
                             if ui.button("版本Diff")
                                 .on_hover_text("对比两个版本的数据差异")
@@ -1557,6 +1591,48 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                     }
                 }
 
+                // ── 表格展示模式切换：二次确认窗口 ──
+                if self.table_layout_confirm {
+                    let target = if self.table_layout_full { "个性化配置" } else { "原始数据" };
+                    egui::Modal::new(egui::Id::new("table_layout_confirm_modal")).show(ctx, |ui| {
+                        ui.heading(format!("将切换为{target}表格展示"));
+                        ui.label("重新加载表格数据需要时间，是否确认切换？");
+                        ui.add_space(8.0);
+                        ui.horizontal(|ui| {
+                            if ui.button("确定").clicked() {
+                                self.table_layout_full = !self.table_layout_full;
+                                self.table_layout_confirm = false;
+                                self.table_layout_switching = true;
+                                self.table_layout_switch_start = Some(std::time::Instant::now());
+                                ctx.request_repaint();
+                            }
+                            if ui.button("取消").clicked() {
+                                self.table_layout_confirm = false;
+                            }
+                        });
+                    });
+                }
+
+                // ── 表格展示模式切换：进行中提示（完成后自动关闭） ──
+                if self.table_layout_switching {
+                    egui::Modal::new(egui::Id::new("table_layout_switching_modal")).show(ctx, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label("正在切换表格展示数据中，请耐心等待……");
+                        });
+                    });
+                    // 显示约600ms后自动关闭（切换已完成）
+                    if self
+                        .table_layout_switch_start
+                        .map_or(true, |t| t.elapsed().as_secs_f32() >= 0.6)
+                    {
+                        self.table_layout_switching = false;
+                        self.table_layout_switch_start = None;
+                    } else {
+                        ctx.request_repaint();
+                    }
+                }
+
 
                 {
                     let ep = self.export_progress.lock().unwrap().clone();
@@ -1644,7 +1720,7 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                     None
                 };
                 let resp = if let Some(ref ds) = diff_state_owned {
-                    crate::diff::draw_diff_table(ds, ui, table.context())
+                    crate::diff::draw_diff_table(ds, ui, table.context(), !self.table_layout_full)
                 } else {
                     table.draw(ui, scroll_to)
                 };
@@ -2817,6 +2893,12 @@ impl App {
             diff_state: crate::diff::DiffState::new(),
             download_exdschema_status: std::sync::Arc::new(std::sync::Mutex::new(crate::downloader::DownloadStatus::Idle)),
             download_hca_status: std::sync::Arc::new(std::sync::Mutex::new(crate::downloader::DownloadStatus::Idle)),
+
+            // ── 表格展示模式切换 ──
+            table_layout_full: false,
+            table_layout_confirm: false,
+            table_layout_switching: false,
+            table_layout_switch_start: None,
 
             // ── 删除CSV版本窗口 ──
             delete_csv_open: false,
