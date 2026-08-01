@@ -168,6 +168,8 @@ pub struct ExportProgress {
     pub error: Option<String>,
     /// 完成时刻（用于成功后自动关闭窗口计时）
     pub done_at: Option<std::time::Instant>,
+    /// 中断导出标志（窗口内“中断导出”按钮置位）
+    pub cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Default for ExportProgress {
@@ -181,6 +183,7 @@ impl Default for ExportProgress {
             done: false,
             error: None,
             done_at: None,
+            cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 }
@@ -296,6 +299,7 @@ impl App {
         self.draw_menubar(ui, on_music);
         self.draw_logger(ui.ctx());
         self.draw_pr_window(ui.ctx());
+        self.draw_export_progress_window(ui.ctx());
         self.poll_list_promise();
 
         CentralPanel::default().show(ui, |ui| {
@@ -337,6 +341,73 @@ impl App {
 
     fn navigate_replace(&self, path: impl Into<Path>) {
         self.router.get().unwrap().replace(path).unwrap();
+    }
+
+    /// 全局导出进度窗口（任何页面都会显示，含中断导出按钮）
+    fn draw_export_progress_window(&mut self, ctx: &egui::Context) {
+        {
+            let ep = self.export_progress.lock().unwrap().clone();
+            if let Some(ep) = ep {
+                // 无错误完成时3秒后自动关闭
+                if ep.done && ep.error.is_none() {
+                    let mut auto_close = false;
+                    {
+                        let mut lock = self.export_progress.lock().unwrap();
+                        if let Some(p) = lock.as_mut() {
+                            match p.done_at {
+                                Some(t) => {
+                                    if t.elapsed().as_secs_f32() >= 3.0 {
+                                        auto_close = true;
+                                    }
+                                }
+                                None => p.done_at = Some(std::time::Instant::now()),
+                            }
+                        }
+                    }
+                    if auto_close {
+                        *self.export_progress.lock().unwrap() = None;
+                    }
+                }
+                let ep2 = self.export_progress.lock().unwrap().clone();
+                if let Some(ep) = ep2 {
+                    let mut show = true;
+                    egui::Window::new("导出进度")
+                        .id("export_progress".into())
+                        .open(&mut show)
+                        .show(ctx, |ui| {
+                            ui.label(ep.title.clone());
+                            if ep.total > 0 {
+                                let frac = ep.current as f32 / ep.total as f32;
+                                ui.add(
+                                    egui::ProgressBar::new(frac)
+                                        .show_percentage()
+                                        .text(format!("{}/{}", ep.current, ep.total)),
+                                );
+                            }
+                            if !ep.current_name.is_empty() {
+                                ui.label(format!("当前: {}", ep.current_name));
+                            }
+                            if let Some(err) = &ep.error {
+                                ui.colored_label(egui::Color32::RED, err);
+                            }
+                            if ep.done {
+                                ui.label("已完成");
+                                if ui.button("关闭").clicked() {
+                                    *self.export_progress.lock().unwrap() = None;
+                                }
+                            } else {
+                                // 进行中：中断导出按钮
+                                if ui.button("中断导出").clicked() {
+                                    if let Some(p) = self.export_progress.lock().unwrap().as_mut() {
+                                        p.cancel
+                                            .store(true, std::sync::atomic::Ordering::Relaxed);
+                                    }
+                                }
+                            }
+                        });
+                }
+            }
+        }
     }
 
     fn draw_goto(&mut self, ctx: &egui::Context) {
@@ -1648,64 +1719,6 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                     }
                 }
 
-
-                {
-                    let ep = self.export_progress.lock().unwrap().clone();
-                    if let Some(ep) = ep {
-                        // 无错误完成时3秒后自动关闭
-                        if ep.done && ep.error.is_none() {
-                            let mut auto_close = false;
-                            {
-                                let mut lock = self.export_progress.lock().unwrap();
-                                if let Some(p) = lock.as_mut() {
-                                    match p.done_at {
-                                        Some(t) => {
-                                            if t.elapsed().as_secs_f32() >= 3.0 {
-                                                auto_close = true;
-                                            }
-                                        }
-                                        None => p.done_at = Some(std::time::Instant::now()),
-                                    }
-                                }
-                            }
-                            if auto_close {
-                                *self.export_progress.lock().unwrap() = None;
-                            }
-                        }
-                        let ep2 = self.export_progress.lock().unwrap().clone();
-                        if let Some(ep) = ep2 {
-                            let mut show = true;
-                            egui::Window::new("导出进度").id("export_progress".into())
-                                .open(&mut show)
-                                .show(ctx, |ui| {
-                                    ui.label(ep.title.clone());
-                                    if ep.total > 0 {
-                                        let frac = ep.current as f32 / ep.total as f32;
-                                        ui.add(
-                                            egui::ProgressBar::new(frac)
-                                                .show_percentage()
-                                                .text(format!("{}/{}", ep.current, ep.total)),
-                                        );
-                                    }
-                                    if !ep.current_name.is_empty() {
-                                        ui.label(format!("当前: {}", ep.current_name));
-                                    }
-                                    if ep.done {
-                                        ui.label("已完成");
-                                        if ui.button("关闭").clicked() {
-                                            *self.export_progress.lock().unwrap() = None;
-                                        }
-                                    } else if let Some(err) = &ep.error {
-                                        ui.colored_label(egui::Color32::RED, err);
-                                        if ui.button("关闭").clicked() {
-                                            *self.export_progress.lock().unwrap() = None;
-                                        }
-                                    }
-                                });
-                        }
-                    }
-                }
-
                 let sheet_name = table.context().sheet().name().to_string();
                 // 切换数据表时自动取消Diff对比
                 if self.diff_state.active && self.diff_state.sheet != sheet_name {
@@ -2349,10 +2362,23 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
             done: false,
             error: None,
             done_at: None,
+            cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         });
 
         self.export_promise = Some(TrackedPromise::spawn_local(async move {
             for (i, sheet_name) in favorite_names.iter().enumerate() {
+                // 检查中断导出请求
+                if progress.lock().unwrap().as_ref().map_or(false, |p| {
+                    p.cancel.load(std::sync::atomic::Ordering::Relaxed)
+                }) {
+                    log::info!("导出已中断");
+                    if let Some(p) = progress.lock().unwrap().as_mut() {
+                        p.done = true;
+                        p.active = false;
+                        p.error = Some("已中断导出".into());
+                    }
+                    break;
+                }
                 let file_name = format!("{}.csv", sheet_name.replace('/', "_"));
                 {
                     if let Some(p) = progress.lock().unwrap().as_mut() {
@@ -2630,12 +2656,25 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                 done: false,
                 error: None,
                 done_at: None,
+                cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             });
         }
 
         self.export_promise = Some(TrackedPromise::spawn_local(async move {
             let total = tracks_for_export.len();
             for (i, (_, track_path)) in tracks_for_export.iter().enumerate() {
+                // 检查中断导出请求
+                if progress.lock().unwrap().as_ref().map_or(false, |p| {
+                    p.cancel.load(std::sync::atomic::Ordering::Relaxed)
+                }) {
+                    log::info!("导出已中断");
+                    if let Some(p) = progress.lock().unwrap().as_mut() {
+                        p.done = true;
+                        p.active = false;
+                        p.error = Some("已中断导出".into());
+                    }
+                    break;
+                }
                 // Yield to keep UI responsive during batch export
                 crate::utils::yield_to_ui().await;
                 let stem = std::path::Path::new(&track_path)
@@ -2754,10 +2793,23 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
             done: false,
             error: None,
             done_at: None,
+            cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         });
 
         self.export_promise = Some(TrackedPromise::spawn_local(async move {
             for (i, sheet_name) in sheets.iter().enumerate() {
+                // 检查中断导出请求
+                if progress.lock().unwrap().as_ref().map_or(false, |p| {
+                    p.cancel.load(std::sync::atomic::Ordering::Relaxed)
+                }) {
+                    log::info!("导出已中断");
+                    if let Some(p) = progress.lock().unwrap().as_mut() {
+                        p.done = true;
+                        p.active = false;
+                        p.error = Some("已中断导出".into());
+                    }
+                    break;
+                }
                 let file_name = format!("{}.csv", sheet_name.replace('/', "_"));
                 {
                     if let Some(p) = progress.lock().unwrap().as_mut() {

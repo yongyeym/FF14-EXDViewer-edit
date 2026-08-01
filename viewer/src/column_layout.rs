@@ -38,7 +38,11 @@ pub fn load_column_layout() -> ColumnLayout {
     match std::fs::read_to_string(&path) {
         Ok(content) => match serde_json::from_str::<ColumnLayout>(&content) {
             Ok(layout) => {
-                log::info!("已加载列布局配置: {}", path.display());
+                // 每帧都会调用，只输出一次避免刷屏
+                static LOGGED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+                let _ = LOGGED.get_or_init(|| {
+                    log::info!("已加载列布局配置: {}", path.display());
+                });
                 layout
             }
             Err(e) => {
