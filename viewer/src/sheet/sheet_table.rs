@@ -50,8 +50,8 @@ struct FilterValue {
 
 pub struct SheetTable {
     context: TableContext,
-    // 个性化列布局：渲染顺序的偏移索引列表（无配置时为 None）
-    column_layout: Option<Vec<u32>>,
+    // 个性化列布局：(偏移索引, 中文显示标题)，顺序即渲染顺序（无配置时为 None）
+    column_layout: Option<Vec<(u32, String)>>,
     // Accumulated subrow count (row_nr), indexed by row index (not ID)
     // This is used to map row_nr to row_id and subrow_id
     subrow_lookup: Option<Vec<u32>>,
@@ -114,9 +114,9 @@ impl SheetTable {
         let layout = crate::column_layout::load_column_layout();
         if let Some(cols) = crate::column_layout::get_sheet_columns(&layout, &sheet_name) {
             let mut offsets = Vec::with_capacity(cols.len());
-            for name in cols {
+            for (name, title) in cols {
                 if let Some(off) = ret.context.find_column_by_name(&name) {
-                    offsets.push(off);
+                    offsets.push((off, title));
                 }
             }
             if !offsets.is_empty() {
@@ -170,7 +170,7 @@ impl SheetTable {
                     self.context
                         .convert_column_index_to_offset_index(column_id.into())
                         .ok()
-                        .and_then(|o| layout.iter().position(|&x| x == o))
+                        .and_then(|o| layout.iter().position(|(off, _)| *off == o))
                 } else if sorted_by_offset {
                     self.context
                         .convert_column_index_to_offset_index(column_id.into())
@@ -642,10 +642,13 @@ impl TableDelegate for SheetTable {
         let sorted_by_offset = SORTED_BY_OFFSET.get(ui.ctx());
 
         // 个性化列布局：渲染列索引 → 偏移索引（固定顺序，忽略按偏移/按序号设置）
-        let layout_offset: Option<u32> = match (&self.column_layout, column_idx) {
-            (Some(layout), Some(c)) => layout.get(c).copied(),
+        // 个性化列布局：渲染列索引 → (偏移索引, 中文显示标题)
+        let layout_col: Option<(u32, String)> = match (&self.column_layout, column_idx) {
+            (Some(layout), Some(c)) => layout.get(c).cloned(),
             _ => None,
         };
+        let layout_offset = layout_col.as_ref().map(|(off, _)| *off);
+        let layout_title = layout_col.as_ref().map(|(_, t)| t.as_str());
 
         let column = if let Some(offset_idx) = layout_offset {
             self.context
@@ -686,7 +689,8 @@ impl TableDelegate for SheetTable {
                 if let Some(((offset_idx, column_idx), (schema_column, sheet_column))) = column {
                     ui.horizontal_top(|ui| {
                         ui.vertical(|ui| {
-                            ui.heading(schema_column.name());
+                            // 个性化列布局：使用配置的中文标题显示列名
+                            ui.heading(layout_title.unwrap_or_else(|| schema_column.name()));
 
                             ui.label(
                                 RichText::new(format!(
@@ -753,7 +757,7 @@ impl TableDelegate for SheetTable {
 
         // 个性化列布局：渲染列索引 → 偏移索引（固定顺序）
         let layout_offset: Option<u32> = match (&self.column_layout, column_idx) {
-            (Some(layout), Some(c)) => layout.get(c).copied(),
+            (Some(layout), Some(c)) => layout.get(c).map(|(off, _)| *off),
             _ => None,
         };
 

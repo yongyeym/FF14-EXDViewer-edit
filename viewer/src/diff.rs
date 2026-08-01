@@ -333,11 +333,12 @@ pub fn draw_diff_table(diff: &DiffState, ui: &mut egui::Ui, context: &crate::she
     use crate::excel::provider::ExcelHeader;
     let sheet_name = context.sheet().name().to_string();
     let layout = crate::column_layout::load_column_layout();
-    let visible: Option<Vec<usize>> = crate::column_layout::get_sheet_columns(&layout, &sheet_name)
+    // (col_meta索引, 中文显示标题)，顺序即展示顺序
+    let visible: Option<Vec<(usize, String)>> = crate::column_layout::get_sheet_columns(&layout, &sheet_name)
         .map(|names| {
             names
                 .iter()
-                .filter_map(|name| col_meta.iter().position(|(n, _)| n == name))
+                .filter_map(|(name, title)| col_meta.iter().position(|(n, _)| n == name).map(|i| (i, title.clone())))
                 .collect::<Vec<_>>()
         })
         .filter(|v| !v.is_empty());
@@ -402,18 +403,20 @@ struct DiffTableDelegate<'a> {
     icon_col_names: &'a std::collections::HashSet<String>,
     context: &'a crate::sheet::TableContext,
     modal_icon_id: &'a mut Option<u32>,
-    /// 个性化列布局：渲染列索引 → col_meta 索引（无配置为 None）
-    col_layout: Option<&'a [usize]>,
+    /// 个性化列布局：(col_meta索引, 中文显示标题)（无配置为 None）
+    col_layout: Option<&'a [(usize, String)]>,
 }
 
 impl egui_table::TableDelegate for DiffTableDelegate<'_> {
     fn header_cell_ui(&mut self, ui: &mut egui::Ui, cell: &egui_table::HeaderCellInfo) {
         let egui_table::HeaderCellInfo { col_range, .. } = cell;
 
-        // 个性化列布局：渲染列索引 → col_meta 索引
-        let data_idx = col_range.start.checked_sub(2).and_then(|di| {
-            self.col_layout.map_or(Some(di), |layout| layout.get(di).copied())
+        // 个性化列布局：渲染列索引 → (col_meta索引, 中文显示标题)
+        let layout_col: Option<(usize, String)> = col_range.start.checked_sub(2).and_then(|di| {
+            self.col_layout.and_then(|layout| layout.get(di).cloned())
         });
+        let data_idx = layout_col.as_ref().map(|(i, _)| *i);
+        let layout_title = layout_col.as_ref().map(|(_, t)| t.as_str());
 
         egui::Frame::NONE.inner_margin(egui::Margin::symmetric(4, 2)).show(ui, |ui| {
             if col_range.start == 0 {
@@ -424,7 +427,8 @@ impl egui_table::TableDelegate for DiffTableDelegate<'_> {
                 if let Some((name, meta)) = self.col_meta.get(di) {
                     ui.horizontal_top(|ui| {
                         ui.vertical(|ui| {
-                            ui.heading(name);
+                            // 个性化列布局：使用配置的中文标题显示列名
+                            ui.heading(layout_title.unwrap_or(name));
                             ui.label(egui::RichText::new(meta).small().color(Color32::GRAY));
                         });
                     });
@@ -451,7 +455,7 @@ impl egui_table::TableDelegate for DiffTableDelegate<'_> {
                 for (ci, cell) in row.cells.iter().enumerate() {
                     // 个性化列布局：只按可见列估算行高
                     if let Some(layout) = self.col_layout {
-                        if !layout.contains(&ci) {
+                        if !layout.iter().any(|(i, _)| *i == ci) {
                             continue;
                         }
                     }
@@ -504,7 +508,7 @@ impl egui_table::TableDelegate for DiffTableDelegate<'_> {
                 let ci = col_nr - 2;
                 // 个性化列布局：渲染列索引 → col_meta 索引
                 let ci = self.col_layout.map_or(ci, |layout| match layout.get(ci) {
-                    Some(&i) => i,
+                    Some(&(i, _)) => i,
                     None => usize::MAX, // 越界，下面会被 bounds 检查拦截
                 });
                 if ci < diff_row.cells.len() && ci < self.col_meta.len() {
