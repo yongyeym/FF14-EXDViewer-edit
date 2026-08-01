@@ -2776,6 +2776,7 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
 impl App {
     #[must_use]
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        crate::column_layout::ensure_default_layout_file();
         install_image_loaders(&cc.egui_ctx);
         Self::apply_fonts(&cc.egui_ctx, None);
         Self::setup_theme(&cc.egui_ctx);

@@ -50,6 +50,8 @@ struct FilterValue {
 
 pub struct SheetTable {
     context: TableContext,
+    // 个性化列布局：渲染顺序的偏移索引列表（无配置时为 None）
+    column_layout: Option<Vec<u32>>,
     // Accumulated subrow count (row_nr), indexed by row index (not ID)
     // This is used to map row_nr to row_id and subrow_id
     subrow_lookup: Option<Vec<u32>>,
@@ -92,6 +94,7 @@ impl SheetTable {
 
         let mut ret = Self {
             context,
+            column_layout: None,
             subrow_lookup,
             row_sizes: Vec::new(),
             modal_image: None,
@@ -104,6 +107,22 @@ impl SheetTable {
             current_filter_promise: None,
             current_filter_cancel_token: None,
         };
+
+        // 读取个性化列布局配置（config/column_layout.json）
+        // 配置存在时：按配置的列顺序渲染，未配置的列隐藏；并忽略“按偏移/按序号”排序设置。
+        let sheet_name = ret.context.sheet().name().to_string();
+        let layout = crate::column_layout::load_column_layout();
+        if let Some(cols) = crate::column_layout::get_sheet_columns(&layout, &sheet_name) {
+            let mut offsets = Vec::with_capacity(cols.len());
+            for name in cols {
+                if let Some(off) = ret.context.find_column_by_name(&name) {
+                    offsets.push(off);
+                }
+            }
+            if !offsets.is_empty() {
+                ret.column_layout = Some(offsets);
+            }
+        }
 
         ret.size_all_rows(ui);
 
@@ -121,13 +140,18 @@ impl SheetTable {
 
         let id = Id::new(self.context.sheet().name());
         ui.push_id(id, |ui| {
+            // 个性化列布局：有配置时列数 = Row列 + 配置列数
+            let total_columns = match &self.column_layout {
+                Some(layout) => layout.len() + 1,
+                None => self.context.sheet().columns().len() + 1,
+            };
             let mut table = egui_table::Table::new()
                 .num_rows(self.get_filtered_row_count() as u64)
                 .columns(vec![
                     egui_table::Column::new(100.0)
                         .range(50.0..=10000.0)
                         .resizable(true);
-                    self.context.sheet().columns().len() + 1
+                    total_columns
                 ])
                 .num_sticky_cols(1)
                 .headers([egui_table::HeaderRow::new(
@@ -141,10 +165,17 @@ impl SheetTable {
                     table = table.scroll_to_row(row_nr, Some(Align::Center));
                 }
                 let sorted_by_offset = SORTED_BY_OFFSET.get(ui.ctx());
-                let column_nr = if sorted_by_offset {
+                let column_nr = if let Some(layout) = &self.column_layout {
+                    // 配置布局：column_id(序号) → offset → 布局中的渲染列号
                     self.context
                         .convert_column_index_to_offset_index(column_id.into())
                         .ok()
+                        .and_then(|o| layout.iter().position(|&x| x == o))
+                } else if sorted_by_offset {
+                    self.context
+                        .convert_column_index_to_offset_index(column_id.into())
+                        .ok()
+                        .map(|o| o as usize)
                 } else {
                     Some(column_id.into())
                 };
@@ -610,20 +641,40 @@ impl TableDelegate for SheetTable {
 
         let sorted_by_offset = SORTED_BY_OFFSET.get(ui.ctx());
 
-        let column = column_idx.and_then(|c| {
-            if sorted_by_offset {
-                self.context
-                    .get_column_by_offset(c as u32)
-                    .map(|v| ((c as u32, v.1.id), v))
-            } else {
-                self.context
-                    .get_column_by_index(c as u32)
-                    .map(|(v, offset_idx)| ((offset_idx, v.1.id), v))
-            }
-            .ok()
-        });
+        // 个性化列布局：渲染列索引 → 偏移索引（固定顺序，忽略按偏移/按序号设置）
+        let layout_offset: Option<u32> = match (&self.column_layout, column_idx) {
+            (Some(layout), Some(c)) => layout.get(c).copied(),
+            _ => None,
+        };
 
-        let is_display_column = self.is_display_column(column_idx, sorted_by_offset);
+        let column = if let Some(offset_idx) = layout_offset {
+            self.context
+                .get_column_by_offset(offset_idx)
+                .map(|v| ((offset_idx, v.1.id), v))
+                .ok()
+        } else {
+            column_idx.and_then(|c| {
+                if sorted_by_offset {
+                    self.context
+                        .get_column_by_offset(c as u32)
+                        .map(|v| ((c as u32, v.1.id), v))
+                } else {
+                    self.context
+                        .get_column_by_index(c as u32)
+                        .map(|(v, offset_idx)| ((offset_idx, v.1.id), v))
+                }
+                .ok()
+            })
+        };
+
+        // 显示字段高亮：配置布局下直接用偏移索引比较
+        let is_display_column = if let Some(offset_idx) = layout_offset {
+            self.context
+                .display_column_idx()
+                .is_some_and(|d| d == offset_idx)
+        } else {
+            self.is_display_column(column_idx, sorted_by_offset)
+        };
 
         if is_display_column {
             Self::paint_cell_background(ui, Color32::LIGHT_BLUE.gamma_multiply(0.05));
@@ -700,6 +751,12 @@ impl TableDelegate for SheetTable {
 
         let sorted_by_offset = SORTED_BY_OFFSET.get(ui.ctx());
 
+        // 个性化列布局：渲染列索引 → 偏移索引（固定顺序）
+        let layout_offset: Option<u32> = match (&self.column_layout, column_idx) {
+            (Some(layout), Some(c)) => layout.get(c).copied(),
+            _ => None,
+        };
+
         if row_nr % 2 == 1 {
             Self::paint_cell_background(ui, ui.visuals().faint_bg_color);
         }
@@ -708,7 +765,15 @@ impl TableDelegate for SheetTable {
             Self::paint_cell_background(ui, Color32::GOLD.gamma_multiply(0.2));
         }
 
-        if self.is_display_column(column_idx, sorted_by_offset) {
+        // 显示字段高亮：配置布局下直接用偏移索引比较
+        let is_display = if let Some(offset_idx) = layout_offset {
+            self.context
+                .display_column_idx()
+                .is_some_and(|d| d == offset_idx)
+        } else {
+            self.is_display_column(column_idx, sorted_by_offset)
+        };
+        if is_display {
             Self::paint_cell_background(ui, Color32::LIGHT_BLUE.gamma_multiply(0.05));
         }
 
@@ -716,7 +781,9 @@ impl TableDelegate for SheetTable {
             .inner_margin(Margin::symmetric(4, 2))
             .show(ui, |ui| {
                 if let Some(column_idx) = column_idx {
-                    let cell = if sorted_by_offset {
+                    let cell = if let Some(offset_idx) = layout_offset {
+                        self.context.cell_by_offset(row_data, offset_idx)
+                    } else if sorted_by_offset {
                         self.context.cell_by_offset(row_data, column_idx as u32)
                     } else {
                         self.context.cell_by_index(row_data, column_idx as u32)

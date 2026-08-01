@@ -25,6 +25,7 @@ mod about;
 mod app;
 pub mod audio;
 mod backend;
+pub mod column_layout;
 pub mod config_file;
 pub mod data;
 pub mod diff;

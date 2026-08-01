@@ -224,6 +224,17 @@ impl TableContext {
             .collect::<anyhow::Result<Vec<_>>>()
     }
 
+    /// 按 yml 定义中的列名查找列，返回其偏移索引（offset index）。
+    /// 用于个性化列布局配置（column_layout.json）。
+    pub fn find_column_by_name(&self, name: &str) -> Option<u32> {
+        self.0
+            .schema_columns
+            .borrow()
+            .iter()
+            .position(|sc| sc.name() == name)
+            .map(|i| i as u32)
+    }
+
     pub fn column_count(&self) -> usize {
         self.0.sheet_columns.len()
     }

@@ -329,7 +329,20 @@ pub fn draw_diff_table(diff: &DiffState, ui: &mut egui::Ui, context: &crate::she
         }
     }
 
-    let total_cols = 2 + col_count; // Diff + Row + data columns
+    // 个性化列布局（config/column_layout.json）：按配置过滤/排序列
+    use crate::excel::provider::ExcelHeader;
+    let sheet_name = context.sheet().name().to_string();
+    let layout = crate::column_layout::load_column_layout();
+    let visible: Option<Vec<usize>> = crate::column_layout::get_sheet_columns(&layout, &sheet_name)
+        .map(|names| {
+            names
+                .iter()
+                .filter_map(|name| col_meta.iter().position(|(n, _)| n == name))
+                .collect::<Vec<_>>()
+        })
+        .filter(|v| !v.is_empty());
+
+    let total_cols = 2 + visible.as_ref().map_or(col_count, |v| v.len()); // Diff + Row + data columns
 
     let id = egui::Id::new("diff_egui_table");
     let mut modal_icon_id: Option<u32> = None;
@@ -346,6 +359,7 @@ pub fn draw_diff_table(diff: &DiffState, ui: &mut egui::Ui, context: &crate::she
             icon_col_names: &icon_col_names,
             context,
             modal_icon_id: &mut modal_icon_id,
+            col_layout: visible.as_deref(),
         });
 
         // Icon preview window (persistent via memory data)
@@ -388,13 +402,18 @@ struct DiffTableDelegate<'a> {
     icon_col_names: &'a std::collections::HashSet<String>,
     context: &'a crate::sheet::TableContext,
     modal_icon_id: &'a mut Option<u32>,
+    /// 个性化列布局：渲染列索引 → col_meta 索引（无配置为 None）
+    col_layout: Option<&'a [usize]>,
 }
 
 impl egui_table::TableDelegate for DiffTableDelegate<'_> {
     fn header_cell_ui(&mut self, ui: &mut egui::Ui, cell: &egui_table::HeaderCellInfo) {
         let egui_table::HeaderCellInfo { col_range, .. } = cell;
 
-        let data_idx = col_range.start.checked_sub(2);
+        // 个性化列布局：渲染列索引 → col_meta 索引
+        let data_idx = col_range.start.checked_sub(2).and_then(|di| {
+            self.col_layout.map_or(Some(di), |layout| layout.get(di).copied())
+        });
 
         egui::Frame::NONE.inner_margin(egui::Margin::symmetric(4, 2)).show(ui, |ui| {
             if col_range.start == 0 {
@@ -430,6 +449,12 @@ impl egui_table::TableDelegate for DiffTableDelegate<'_> {
             let mut has_icon = false;
             if let Some(row) = self.rows.get(ri) {
                 for (ci, cell) in row.cells.iter().enumerate() {
+                    // 个性化列布局：只按可见列估算行高
+                    if let Some(layout) = self.col_layout {
+                        if !layout.contains(&ci) {
+                            continue;
+                        }
+                    }
                     let est_lines = ((cell.len() as f32) / chars_per_col).ceil() as u32;
                     if est_lines > max_lines { max_lines = est_lines; }
                     // Check if this column is an icon column
@@ -477,6 +502,11 @@ impl egui_table::TableDelegate for DiffTableDelegate<'_> {
             } else {
                 // Data column
                 let ci = col_nr - 2;
+                // 个性化列布局：渲染列索引 → col_meta 索引
+                let ci = self.col_layout.map_or(ci, |layout| match layout.get(ci) {
+                    Some(&i) => i,
+                    None => usize::MAX, // 越界，下面会被 bounds 检查拦截
+                });
                 if ci < diff_row.cells.len() && ci < self.col_meta.len() {
                     let col_name = &self.col_meta[ci].0;
                     if self.icon_col_names.contains(col_name) {
