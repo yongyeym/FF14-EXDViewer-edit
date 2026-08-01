@@ -2330,6 +2330,7 @@ version = "1.7.1"
 dependencies = [
  "anyhow",
  "arboard",
+ "async-channel 2.5.0",
  "async-trait",
  "base64 0.23.0",
  "binrw",

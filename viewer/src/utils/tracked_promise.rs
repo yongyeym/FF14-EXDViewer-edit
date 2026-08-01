@@ -21,6 +21,9 @@ static PROMISE_CTX: OnceLock<egui::Context> = OnceLock::new();
 pub fn tick_promises(ctx: &egui::Context) {
     PROMISE_CTX.get_or_init(|| ctx.clone());
 
+    // 每帧向等待中的 async 任务发送一次 UI 帧节拍（yield_to_ui 依赖它真正让出）
+    super::yield_now::notify_ui_tick();
+
     #[cfg(not(target_arch = "wasm32"))]
     poll_promise::tick_local();
 
