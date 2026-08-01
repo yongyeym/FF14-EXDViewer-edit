@@ -418,12 +418,19 @@ impl egui_table::TableDelegate for DiffTableDelegate<'_> {
     fn header_cell_ui(&mut self, ui: &mut egui::Ui, cell: &egui_table::HeaderCellInfo) {
         let egui_table::HeaderCellInfo { col_range, .. } = cell;
 
-        // 个性化列布局：渲染列索引 → (col_meta索引, 中文显示标题)
-        let layout_col: Option<(usize, String)> = col_range.start.checked_sub(2).and_then(|di| {
-            self.col_layout.and_then(|layout| layout.get(di).cloned())
+        // 个性化列布局：有配置时映射到 (col_meta索引, 中文显示标题)；无配置时按原始列序
+        let data_idx = col_range.start.checked_sub(2).and_then(|di| {
+            match self.col_layout {
+                Some(layout) => layout.get(di).map(|(i, _)| *i),
+                None => Some(di),
+            }
         });
-        let data_idx = layout_col.as_ref().map(|(i, _)| *i);
-        let layout_title = layout_col.as_ref().map(|(_, t)| t.as_str());
+        let layout_title = col_range.start.checked_sub(2).and_then(|di| {
+            match self.col_layout {
+                Some(layout) => layout.get(di).map(|(_, t)| t.as_str()),
+                None => None,
+            }
+        });
 
         egui::Frame::NONE.inner_margin(egui::Margin::symmetric(4, 2)).show(ui, |ui| {
             if col_range.start == 0 {
