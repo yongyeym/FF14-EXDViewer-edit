@@ -1242,6 +1242,17 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                             });
                         }
 
+                        // 返回按钮：返回跳转前的数据表（Link单元格跳转后）
+                        if ui
+                            .button("← 返回")
+                            .on_hover_text("返回跳转前的数据表")
+                            .clicked()
+                        {
+                            if let Err(e) = self.router.get().unwrap().back() {
+                                log::debug!("无法返回（已在最前页）: {e}");
+                            }
+                        }
+
                         ui.vertical_centered_justified(|ui| ui.heading(sheet_name.clone()));
                     });
                     ui.add_space(4.0);
