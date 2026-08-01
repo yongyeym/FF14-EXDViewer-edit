@@ -246,8 +246,9 @@ pub const SCHEMA_EDITOR_VISIBLE: DKey<bool> = DKey::new("schema-editor-visible",
 pub const SCHEMA_EDITOR_WORD_WRAP: DKey<bool> = DKey::new("schema-editor-word-wrap", false);
 pub const SCHEMA_EDITOR_ERRORS_SHOWN: DKey<bool> = DKey::new("schema-editor-errors-shown", false);
 
-/// Temporary: icon save request (icon_id, sheet_name, column_name, save_all)
-pub const ICON_SAVE_REQUEST: TempKey<(u32, String, String, bool)> =
+/// Temporary: icon save request
+/// (icon_id, sheet_name, column_name, save_all, 可选差异行row_keys——仅diff表格导出此列全部时)
+pub const ICON_SAVE_REQUEST: TempKey<(u32, String, String, bool, Option<Vec<String>>)> =
     TempKey::new("icon-save-request");
 
 pub const COLOR_THEME: FKey<ColorTheme, ThemePreference> = FKey::new_with_preflight(

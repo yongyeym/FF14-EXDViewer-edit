@@ -355,6 +355,12 @@ pub fn draw_diff_table(
 
     let id = egui::Id::new("diff_egui_table");
     let mut modal_icon_id: Option<(u32, String, String)> = None;
+    // 预收集新增行（新版本差异行）的 row_key，供“保存此列全部图片”只导出差异行
+    let added_row_keys: Vec<String> = rows
+        .iter()
+        .filter(|r| r.diff_type == DiffType::Added)
+        .map(|r| r.row_key.clone())
+        .collect();
     ui.push_id(id, |ui| {
         let table = egui_table::Table::new()
             .num_rows(rows.len() as u64)
@@ -369,6 +375,7 @@ pub fn draw_diff_table(
             context,
             modal_icon_id: &mut modal_icon_id,
             col_layout: visible.as_deref(),
+            added_row_keys: &added_row_keys,
         });
 
         // Icon preview window (persistent via memory data) —— 复用普通数据表的预览 Modal
@@ -403,6 +410,8 @@ struct DiffTableDelegate<'a> {
     modal_icon_id: &'a mut Option<(u32, String, String)>,
     /// 个性化列布局：(col_meta索引, 中文显示标题)（无配置为 None）
     col_layout: Option<&'a [(usize, String)]>,
+    /// 新增行（新版本差异行）的 row_key，用于“保存此列全部图片”只导出差异行
+    added_row_keys: &'a [String],
 }
 
 impl egui_table::TableDelegate for DiffTableDelegate<'_> {
@@ -515,7 +524,14 @@ impl egui_table::TableDelegate for DiffTableDelegate<'_> {
                         if let Ok(id) = diff_row.cells[ci].parse::<u32>() {
                             let resp = {
                                 use crate::excel::provider::ExcelHeader;
-                                draw_icon(self.context.global(), ui, id, self.context.sheet().name(), col_name)
+                                draw_icon(
+                                    self.context.global(),
+                                    ui,
+                                    id,
+                                    self.context.sheet().name(),
+                                    col_name,
+                                    Some(self.added_row_keys.to_vec()),
+                                )
                             };
                             if resp.clicked() {
                                 use crate::excel::provider::ExcelHeader;

@@ -476,7 +476,7 @@ impl CellValue {
                     return InnerResponse::new(CellResponse::None, copyable_label(ui, &icon_id));
                 };
 
-                let resp = draw_icon(ctx, ui, icon_id, sheet_name, col_name).on_hover_cursor(CursorIcon::PointingHand);
+                let resp = draw_icon(ctx, ui, icon_id, sheet_name, col_name, None).on_hover_cursor(CursorIcon::PointingHand);
                 if resp.clicked() && !should_ignore_clicks(ui) {
                     return InnerResponse::new(CellResponse::Icon(icon_id, Some(col_name.to_string())), resp);
                 }
@@ -535,7 +535,14 @@ impl CellValue {
     }
 }
 
-pub(crate) fn draw_icon(ctx: &GlobalContext, ui: &mut egui::Ui, icon_id: u32, sheet_name: &str, col_name: &str) -> egui::Response {
+pub(crate) fn draw_icon(
+    ctx: &GlobalContext,
+    ui: &mut egui::Ui,
+    icon_id: u32,
+    sheet_name: &str,
+    col_name: &str,
+    save_all_row_keys: Option<Vec<String>>,
+) -> egui::Response {
     let (excel, icon_mgr) = (ctx.backend().excel().clone(), &ctx.icon_manager());
     let hires = ALWAYS_HIRES.get(ui.ctx());
     let image_source = icon_mgr.get_or_insert_icon(icon_id, hires, ui.ctx(), move || {
@@ -601,13 +608,13 @@ pub(crate) fn draw_icon(ctx: &GlobalContext, ui: &mut egui::Ui, icon_id: u32, sh
         if ui.button("保存此图片").clicked() {
             let sn = sheet_name.to_string();
             let cn = col_name.to_string();
-            ICON_SAVE_REQUEST.set(ui.ctx(), (icon_id, cn, sn, false));
+            ICON_SAVE_REQUEST.set(ui.ctx(), (icon_id, cn, sn, false, None));
             ui.close();
         }
         if ui.button("保存此列全部图片").clicked() {
             let sn = sheet_name.to_string();
             let cn = col_name.to_string();
-            ICON_SAVE_REQUEST.set(ui.ctx(), (icon_id, cn, sn, true));
+            ICON_SAVE_REQUEST.set(ui.ctx(), (icon_id, cn, sn, true, save_all_row_keys.clone()));
             ui.close();
         }
     });
@@ -676,7 +683,7 @@ pub(crate) fn draw_icon_modal(
                         if ui.button("保存此图片").clicked() {
                             crate::settings::ICON_SAVE_REQUEST.set(
                                 ui.ctx(),
-                                (icon_id, col_name.clone().unwrap_or_default(), sheet_name.clone(), false),
+                                (icon_id, col_name.clone().unwrap_or_default(), sheet_name.clone(), false, None),
                             );
                         }
                     });

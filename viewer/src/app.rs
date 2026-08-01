@@ -1828,11 +1828,11 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
         }
 
         // Handle icon save requests from context menu
-        if let Some((icon_id, col_name, sheet_name, save_all)) = ICON_SAVE_REQUEST.take(ui.ctx()) {
+        if let Some((icon_id, col_name, sheet_name, save_all, row_keys)) = ICON_SAVE_REQUEST.take(ui.ctx()) {
             if let Some(backend) = self.backend.clone() {
                 let hires = ALWAYS_HIRES.get(ui.ctx());
                 let lang = LANGUAGE.get(ui.ctx());
-                self.command_save_icon(backend, icon_id, &col_name, &sheet_name, save_all, hires, lang);
+                self.command_save_icon(backend, icon_id, &col_name, &sheet_name, save_all, row_keys, hires, lang);
             }
         }
     }
@@ -2471,6 +2471,7 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
         col_name: &str,
         sheet_name: &str,
         save_all: bool,
+        row_keys: Option<Vec<String>>,
         hires: bool,
         lang: Language,
     ) {
@@ -2484,6 +2485,23 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
         let col_name = col_name.to_string();
         let safe_col = col_name.replace(|c: char| !c.is_alphanumeric() && c != '-' && c != '_', "_");
         let sheet_name = sheet_name.to_string();
+        let row_keys = row_keys.map(|v| v.into_iter().filter_map(|k| k.parse::<u32>().ok()).collect::<Vec<u32>>());
+
+        // 导出此列全部图片：显示进度窗口（单张保存不显示）
+        let progress = self.export_progress.clone();
+        if save_all {
+            *progress.lock().unwrap() = Some(ExportProgress {
+                active: true,
+                title: format!("导出图标：{sheet_name}-{col_name}"),
+                current: 0,
+                total: 0,
+                current_name: String::new(),
+                done: false,
+                error: None,
+                done_at: None,
+                cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            });
+        }
 
         self.export_promise = Some(TrackedPromise::spawn_local(async move {
             if save_all {
@@ -2521,13 +2539,42 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                         }
                         let Some((col_offset, col_kind)) = target else {
                             log::warn!("批量导出图标失败：未找到列 {col_name}（{sheet_name}）");
+                            if let Some(p) = progress.lock().unwrap().as_mut() {
+                                p.done = true;
+                                p.active = false;
+                                p.error = Some(format!("未找到列 {col_name}"));
+                            }
                             return;
                         };
-                        let row_ids: Vec<u32> = context.sheet().get_row_ids().collect();
+                        // 差异行过滤：仅导出指定 row_ids 对应的行（diff表格新增行）
+                        let row_ids: Vec<u32> = if let Some(keys) = &row_keys {
+                            keys.clone()
+                        } else {
+                            context.sheet().get_row_ids().collect()
+                        };
                         let total = row_ids.len();
+                        if let Some(p) = progress.lock().unwrap().as_mut() {
+                            p.total = total;
+                        }
                         log::info!("开始批量导出 {sheet_name} 的图标（列 {col_name}），共 {total} 行");
                         let mut saved = 0usize;
                         for (ri, row_id) in row_ids.iter().enumerate() {
+                            // 检查中断导出请求
+                            if progress.lock().unwrap().as_ref().map_or(false, |p| {
+                                p.cancel.load(std::sync::atomic::Ordering::Relaxed)
+                            }) {
+                                log::info!("图标导出已中断");
+                                if let Some(p) = progress.lock().unwrap().as_mut() {
+                                    p.done = true;
+                                    p.active = false;
+                                    p.error = Some("已中断导出".into());
+                                }
+                                return;
+                            }
+                            if let Some(p) = progress.lock().unwrap().as_mut() {
+                                p.current = ri + 1;
+                                p.current_name = format!("Row {row_id}");
+                            }
                             if ri % 50 == 0 {
                                 crate::utils::yield_to_ui().await;
                             }
@@ -2550,9 +2597,20 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                                 _ => {}
                             }
                         }
+                        if let Some(p) = progress.lock().unwrap().as_mut() {
+                            p.done = true;
+                            p.active = false;
+                        }
                         log::info!("图标批量导出完成: {sheet_name}，共保存 {saved} 个（目录: {}）", export_dir.display());
                     }
-                    Err(e) => log::error!("读取数据表 {sheet_name} 失败: {e}"),
+                    Err(e) => {
+                        log::error!("读取数据表 {sheet_name} 失败: {e}");
+                        if let Some(p) = progress.lock().unwrap().as_mut() {
+                            p.done = true;
+                            p.active = false;
+                            p.error = Some(e.to_string());
+                        }
+                    }
                 }
                 return;
             }
