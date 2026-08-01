@@ -2487,39 +2487,70 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
 
         self.export_promise = Some(TrackedPromise::spawn_local(async move {
             if save_all {
-                // Save all icons from the entire sheet
+                // Save all icons from the target column
+                // 通过 schema（yml）按列名定位列：exh 列本身没有名字
+                use crate::sheet::TableContext;
                 match excel.get_sheet(&sheet_name, lang).await {
                     Ok(sheet) => {
-                        let col_count = sheet.columns().len();
-                        let row_ids: Vec<u32> = sheet.get_row_ids().collect();
-                        let total = row_ids.len();
-                        log::info!("开始批量导出 {sheet_name} 的图标，共 {total} 行");
-                        for (ri, row_id) in row_ids.iter().enumerate() {
-                            let Ok(row) = sheet.get_row(*row_id) else { continue };
-                            use ironworks::file::exh::ColumnKind;
-                            for ci in 0..col_count {
-                                let col = &sheet.columns()[ci];
-                                if col.kind() != ColumnKind::Int32 { continue; }
-                                let val: i32 = crate::sheet::cell::read_integer(
-                                    row, col.offset() as u32, col.kind(),
-                                ).unwrap_or(0);
-                                if val <= 0 || val > u32::MAX as i32 { continue; }
-                                let id = val as u32;
-                                crate::utils::yield_to_ui().await;
-                                match excel.get_icon(id, hires).await {
-                                    Ok(either::Either::Right(img)) => {
-                                        let mut buf = std::io::Cursor::new(Vec::new());
-                                        if img.write_to(&mut buf, image::ImageFormat::Png).is_ok() {
-                                            let fname = format!("{sheet_name}-col{ci}-{id}.png");
-                                            let _ = std::fs::write(export_dir.join(&fname), buf.into_inner());
-                                        }
-                                    }
-                                    _ => {}
+                        let editable =
+                            crate::editable_schema::EditableSchema::from_miscellaneous(
+                            &sheet_name,
+                        )
+                            .ok();
+                        let schema = editable.as_ref().and_then(|e| e.get_schema());
+                        let context = TableContext::new(
+                            crate::sheet::GlobalContext::new(
+                                egui::Context::default(),
+                                backend.clone(),
+                                lang,
+                                IconManager::new(),
+                            ),
+                            sheet,
+                            schema,
+                        );
+                        // 按列名找到目标图标列
+                        let col_count = context.column_count();
+                        let mut target = None;
+                        for ci in 0..col_count {
+                            if let Ok(((sc, shc), _)) = context.get_column_by_index(ci as u32) {
+                                if sc.name() == col_name {
+                                    target = Some((shc.offset() as u32, shc.kind()));
+                                    break;
                                 }
                             }
-                            if ri % 50 == 0 { crate::utils::yield_to_ui().await; }
                         }
-                        log::info!("图标批量导出完成: {sheet_name}");
+                        let Some((col_offset, col_kind)) = target else {
+                            log::warn!("批量导出图标失败：未找到列 {col_name}（{sheet_name}）");
+                            return;
+                        };
+                        let row_ids: Vec<u32> = context.sheet().get_row_ids().collect();
+                        let total = row_ids.len();
+                        log::info!("开始批量导出 {sheet_name} 的图标（列 {col_name}），共 {total} 行");
+                        let mut saved = 0usize;
+                        for (ri, row_id) in row_ids.iter().enumerate() {
+                            if ri % 50 == 0 {
+                                crate::utils::yield_to_ui().await;
+                            }
+                            let Ok(row) = context.sheet().get_row(*row_id) else { continue };
+                            let val: i64 = crate::sheet::cell::read_integer(
+                                row, col_offset, col_kind,
+                            ).unwrap_or(0);
+                            if val <= 0 || val > u32::MAX as i64 { continue; }
+                            let id = val as u32;
+                            match excel.get_icon(id, hires).await {
+                                Ok(either::Either::Right(img)) => {
+                                    let mut buf = std::io::Cursor::new(Vec::new());
+                                    if img.write_to(&mut buf, image::ImageFormat::Png).is_ok() {
+                                        let fname = format!("{sheet_name}-{safe_col}-{id}.png");
+                                        if std::fs::write(export_dir.join(&fname), buf.into_inner()).is_ok() {
+                                            saved += 1;
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        log::info!("图标批量导出完成: {sheet_name}，共保存 {saved} 个（目录: {}）", export_dir.display());
                     }
                     Err(e) => log::error!("读取数据表 {sheet_name} 失败: {e}"),
                 }

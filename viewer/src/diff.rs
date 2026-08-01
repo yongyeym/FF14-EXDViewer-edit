@@ -355,7 +355,7 @@ pub fn draw_diff_table(
     let total_cols = 2 + visible.as_ref().map_or(col_count, |v| v.len()); // Diff + Row + data columns
 
     let id = egui::Id::new("diff_egui_table");
-    let mut modal_icon_id: Option<u32> = None;
+    let mut modal_icon_id: Option<(u32, String, String)> = None;
     ui.push_id(id, |ui| {
         let table = egui_table::Table::new()
             .num_rows(rows.len() as u64)
@@ -374,10 +374,12 @@ pub fn draw_diff_table(
 
         // Icon preview window (persistent via memory data)
         let modal_id = egui::Id::new("diff_modal_icon");
-        if let Some(id) = modal_icon_id {
-            ui.memory_mut(|mem| mem.data.insert_temp(modal_id, id));
+        if let Some((id, col_name, sheet_name)) = modal_icon_id {
+            ui.memory_mut(|mem| mem.data.insert_temp(modal_id, (id, col_name, sheet_name)));
         }
-        if let Some(icon_id) = ui.memory(|mem| mem.data.get_temp::<u32>(modal_id)) {
+        if let Some((icon_id, col_name, sheet_name)) =
+            ui.memory(|mem| mem.data.get_temp::<(u32, String, String)>(modal_id))
+        {
             let ctx = context.global();
             let sg = ctx.backend().excel().clone();
             let icon_mgr = &ctx.icon_manager();
@@ -397,9 +399,17 @@ pub fn draw_diff_table(
                     } else {
                         ui.label("加载中...");
                     }
+                    ui.add_space(6.0);
+                    if ui.button("保存图片").clicked() {
+                        crate::settings::ICON_SAVE_REQUEST
+                            .set(ui.ctx(), (icon_id, col_name.clone(), sheet_name.clone(), false));
+                        ui.close();
+                        // 关闭预览窗口
+                        ui.memory_mut(|mem| mem.data.remove::<(u32, String, String)>(modal_id));
+                    }
                 });
             if !open {
-                ui.memory_mut(|mem| mem.data.remove::<u32>(modal_id));
+                ui.memory_mut(|mem| mem.data.remove::<(u32, String, String)>(modal_id));
             }
         }
     });
@@ -411,7 +421,8 @@ struct DiffTableDelegate<'a> {
     col_meta: &'a [(String, String)],
     icon_col_names: &'a std::collections::HashSet<String>,
     context: &'a crate::sheet::TableContext,
-    modal_icon_id: &'a mut Option<u32>,
+    /// (icon_id, 列名, 表名) —— 点击图片时记录，用于预览窗口保存
+    modal_icon_id: &'a mut Option<(u32, String, String)>,
     /// 个性化列布局：(col_meta索引, 中文显示标题)（无配置为 None）
     col_layout: Option<&'a [(usize, String)]>,
 }
@@ -529,7 +540,12 @@ impl egui_table::TableDelegate for DiffTableDelegate<'_> {
                                 draw_icon(self.context.global(), ui, id, self.context.sheet().name(), col_name)
                             };
                             if resp.clicked() {
-                                *self.modal_icon_id = Some(id);
+                                use crate::excel::provider::ExcelHeader;
+                                *self.modal_icon_id = Some((
+                                    id,
+                                    col_name.clone(),
+                                    self.context.sheet().name().to_string(),
+                                ));
                             }
                             return;
                         }
