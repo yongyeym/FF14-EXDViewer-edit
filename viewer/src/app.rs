@@ -2492,11 +2492,11 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                 use crate::sheet::TableContext;
                 match excel.get_sheet(&sheet_name, lang).await {
                     Ok(sheet) => {
-                        let editable =
-                            crate::editable_schema::EditableSchema::from_miscellaneous(
-                            &sheet_name,
+                        // 加载真实 schema（yml），按列名定位列
+                        let editable = crate::config_file::load_schema_for_export(
+                            &backend, &sheet_name,
                         )
-                            .ok();
+                        .await;
                         let schema = editable.as_ref().and_then(|e| e.get_schema());
                         let context = TableContext::new(
                             crate::sheet::GlobalContext::new(

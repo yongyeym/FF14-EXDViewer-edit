@@ -1,5 +1,5 @@
 use egui::{
-    Align, Color32, Id, InnerResponse, Layout, Margin, Modal, RichText, Spinner, UiBuilder,
+    Align, Color32, Id, InnerResponse, Layout, Margin, RichText, UiBuilder,
 };
 use egui_table::TableDelegate;
 use itertools::Itertools;
@@ -16,8 +16,8 @@ use std::{
 use web_time::{Duration, Instant};
 
 use crate::{
-    excel::provider::{ExcelHeader, ExcelProvider, ExcelRow, ExcelSheet},
-    settings::{ICON_SAVE_REQUEST, SHEET_FILTER_OPTIONS, SHEET_FILTERS, SORTED_BY_OFFSET, TEMP_HIGHLIGHTED_ROW},
+    excel::provider::{ExcelHeader, ExcelRow, ExcelSheet},
+    settings::{SHEET_FILTER_OPTIONS, SHEET_FILTERS, SORTED_BY_OFFSET, TEMP_HIGHLIGHTED_ROW},
     sheet::{
         ComplexFilter, FilterInput, FilterInputType, filter::CompiledFilterInput,
         should_ignore_clicks,
@@ -31,7 +31,7 @@ use crate::{
             MULTILINE2_STOPWATCH, MULTILINE3_STOPWATCH, MULTILINE4_STOPWATCH,
         },
     },
-    utils::{ManagedIcon, PromiseKind, TrackedPromise, yield_to_ui},
+    utils::{PromiseKind, TrackedPromise, yield_to_ui},
 };
 
 use super::{cell::CellResponse, table_context::TableContext};
@@ -200,71 +200,18 @@ impl SheetTable {
 
         if let Some(icon_id) = &self.modal_image {
             let icon_id = *icon_id;
-            let resp = Modal::new(Id::new("icon-modal"))
-                .area(Modal::default_area(Id::new(format!(
-                    "icon-modal-{icon_id}"
-                ))))
-                .show(ui.ctx(), |ui| {
-                    let (excel, icon_mgr) = (
-                        self.context.global().backend().excel().clone(),
-                        &self.context.global().icon_manager(),
-                    );
-                    let resp = icon_mgr.get_or_insert_icon(icon_id, true, ui.ctx(), move || {
-                        log::debug!("Hires icon not found in cache: {icon_id}");
-                        TrackedPromise::spawn_local(
-                            async move { excel.get_icon(icon_id, true).await },
-                        )
-                    });
-                    ui.vertical(|ui| {
-                        match resp {
-                            ManagedIcon::Loaded(icon) => {
-                                ui.add(
-                                    egui::Image::new(icon)
-                                        .fit_to_exact_size(ui.available_size()),
-                                );
-                            }
-                            ManagedIcon::Failed(e) => {
-                                ui.label("Failed to load icon").on_hover_text(e.to_string());
-                            }
-                            ManagedIcon::Loading => {
-                                let (rect, _) =
-                                    ui.allocate_exact_size(ui.available_size(), egui::Sense::hover());
-                                ui.scope_builder(
-                                    UiBuilder::new()
-                                        .max_rect(rect)
-                                        .layout(Layout::centered_and_justified(ui.layout().main_dir())),
-                                    |ui| {
-                                        ui.add(Spinner::new().size(
-                                            ui.text_style_height(&egui::TextStyle::Heading) * 3.0,
-                                        ))
-                                    },
-                                )
-                                .inner;
-                            }
-                            ManagedIcon::NotLoaded => {
-                                ui.label("Icon not loaded");
-                            }
-                        }
-                        ui.separator();
-                        ui.horizontal(|ui| {
-                            ui.label(format!("Id: {icon_id}"));
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if ui.button("保存此图片").clicked() {
-                                    let sheet_name = self.context.sheet().name();
-                                    let col_name = self.modal_column_name.clone().unwrap_or_default();
-                                    ICON_SAVE_REQUEST.set(ui.ctx(), (
-                                        icon_id,
-                                        col_name,
-                                        sheet_name.to_string(),
-                                        false,
-                                    ));
-                                }
-                            });
-                        });
-                    })
-                });
-            if resp.should_close() {
+            let sheet_name = self.context.sheet().name().to_string();
+            let col_name = self.modal_column_name.clone();
+            let should_close = crate::sheet::cell::draw_icon_modal(
+                ui,
+                &self.context.global(),
+                icon_id,
+                col_name,
+                sheet_name,
+            );
+            if should_close {
                 self.modal_image = None;
+                self.modal_column_name = None;
             }
         }
 

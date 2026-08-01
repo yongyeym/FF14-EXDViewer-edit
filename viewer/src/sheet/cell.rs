@@ -614,6 +614,78 @@ pub(crate) fn draw_icon(ctx: &GlobalContext, ui: &mut egui::Ui, icon_id: u32, sh
     resp
 }
 
+/// 图片预览 Modal（与普通数据表一致）：居中显示、无标题、点击外部区域关闭、
+/// 左下角显示图片 ID、右下角保存按钮（保存后窗口不关闭）。
+/// 返回 true 表示用户点击了外部区域（调用方应关闭预览状态）。
+pub(crate) fn draw_icon_modal(
+    ui: &mut egui::Ui,
+    context: &GlobalContext,
+    icon_id: u32,
+    col_name: Option<String>,
+    sheet_name: String,
+) -> bool {
+    let resp = egui::Modal::new(egui::Id::new("icon-modal"))
+        .area(egui::Modal::default_area(egui::Id::new(format!(
+            "icon-modal-{icon_id}"
+        ))))
+        .show(ui.ctx(), |ui| {
+            let (excel, icon_mgr) = (
+                context.backend().excel().clone(),
+                &context.icon_manager(),
+            );
+            let resp = icon_mgr.get_or_insert_icon(icon_id, true, ui.ctx(), move || {
+                log::debug!("Hires icon not found in cache: {icon_id}");
+                crate::utils::TrackedPromise::spawn_local(
+                    async move { excel.get_icon(icon_id, true).await },
+                )
+            });
+            ui.vertical(|ui| {
+                match resp {
+                    crate::utils::ManagedIcon::Loaded(icon) => {
+                        ui.add(egui::Image::new(icon).fit_to_exact_size(ui.available_size()));
+                    }
+                    crate::utils::ManagedIcon::Failed(e) => {
+                        ui.label("Failed to load icon").on_hover_text(e.to_string());
+                    }
+                    crate::utils::ManagedIcon::Loading => {
+                        let (rect, _) =
+                            ui.allocate_exact_size(ui.available_size(), egui::Sense::hover());
+                        ui.scope_builder(
+                            egui::UiBuilder::new()
+                                .max_rect(rect)
+                                .layout(egui::Layout::centered_and_justified(
+                                    ui.layout().main_dir(),
+                                )),
+                            |ui| {
+                                ui.add(
+                                    egui::Spinner::new()
+                                        .size(ui.text_style_height(&egui::TextStyle::Heading) * 3.0),
+                                )
+                            },
+                        )
+                        .inner;
+                    }
+                    crate::utils::ManagedIcon::NotLoaded => {
+                        ui.label("Icon not loaded");
+                    }
+                }
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.label(format!("Id: {icon_id}"));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("保存此图片").clicked() {
+                            crate::settings::ICON_SAVE_REQUEST.set(
+                                ui.ctx(),
+                                (icon_id, col_name.clone().unwrap_or_default(), sheet_name.clone(), false),
+                            );
+                        }
+                    });
+                });
+            })
+        });
+    resp.should_close()
+}
+
 fn draw_color(ui: &mut egui::Ui, color: Color32) -> egui::Response {
     let resp = {
         let (rect, response) =

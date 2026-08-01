@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use crate::excel::provider::ExcelProvider;
 use crate::sheet::cell::draw_icon;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -372,7 +371,7 @@ pub fn draw_diff_table(
             col_layout: visible.as_deref(),
         });
 
-        // Icon preview window (persistent via memory data)
+        // Icon preview window (persistent via memory data) —— 复用普通数据表的预览 Modal
         let modal_id = egui::Id::new("diff_modal_icon");
         if let Some((id, col_name, sheet_name)) = modal_icon_id {
             ui.memory_mut(|mem| mem.data.insert_temp(modal_id, (id, col_name, sheet_name)));
@@ -380,35 +379,14 @@ pub fn draw_diff_table(
         if let Some((icon_id, col_name, sheet_name)) =
             ui.memory(|mem| mem.data.get_temp::<(u32, String, String)>(modal_id))
         {
-            let ctx = context.global();
-            let sg = ctx.backend().excel().clone();
-            let icon_mgr = &ctx.icon_manager();
-            let mut open = true;
-            egui::Window::new(format!("图片预览 (Icon {icon_id})"))
-                .id(egui::Id::new("diff_icon_window"))
-                .open(&mut open)
-                .show(ui.ctx(), |ui| {
-                    let snapshot = icon_mgr.get_or_insert_icon(icon_id, true, ui.ctx(), move || {
-                        let sg = sg.clone();
-                        crate::utils::TrackedPromise::spawn_local(
-                            async move { sg.get_icon(icon_id, true).await }
-                        )
-                    });
-                    if let crate::utils::ManagedIcon::Loaded(source) = snapshot {
-                        ui.add(egui::Image::new(source).fit_to_exact_size(egui::vec2(400.0, 400.0)));
-                    } else {
-                        ui.label("加载中...");
-                    }
-                    ui.add_space(6.0);
-                    if ui.button("保存图片").clicked() {
-                        crate::settings::ICON_SAVE_REQUEST
-                            .set(ui.ctx(), (icon_id, col_name.clone(), sheet_name.clone(), false));
-                        ui.close();
-                        // 关闭预览窗口
-                        ui.memory_mut(|mem| mem.data.remove::<(u32, String, String)>(modal_id));
-                    }
-                });
-            if !open {
+            let should_close = crate::sheet::cell::draw_icon_modal(
+                ui,
+                context.global(),
+                icon_id,
+                Some(col_name),
+                sheet_name,
+            );
+            if should_close {
                 ui.memory_mut(|mem| mem.data.remove::<(u32, String, String)>(modal_id));
             }
         }
