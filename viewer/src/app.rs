@@ -242,6 +242,8 @@ pub struct App {
     table_layout_switching: bool,
     /// 切换提示开始时间（用于延时自动关闭）
     table_layout_switch_start: Option<std::time::Instant>,
+    /// 待执行的表格缓存重载标志（在借用释放后处理）
+    table_layout_reload_pending: bool,
     // ── 删除CSV版本窗口 ──
     delete_csv_open: bool,
     delete_csv_versions: Vec<String>,
@@ -1601,6 +1603,8 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                         ui.horizontal(|ui| {
                             if ui.button("确定").clicked() {
                                 self.table_layout_full = !self.table_layout_full;
+                                // 标记待重载（借用释放后在 draw_sheet_data 之前执行）
+                                self.table_layout_reload_pending = true;
                                 self.table_layout_confirm = false;
                                 self.table_layout_switching = true;
                                 self.table_layout_switch_start = Some(std::time::Instant::now());
@@ -2008,6 +2012,12 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
 
     fn draw_named_sheet(&mut self, ui: &mut egui::Ui, _path: &Path, _params: &Params<'_, '_>) {
         self.draw_goto(ui.ctx());
+
+        // 处理表格展示模式切换后的缓存重载（借用已释放）
+        if self.table_layout_reload_pending {
+            self.sheet_data.clear();
+            self.table_layout_reload_pending = false;
+        }
 
         self.draw_sheet_list(ui);
         self.draw_sheet_data(ui);
@@ -2899,6 +2909,7 @@ impl App {
             table_layout_confirm: false,
             table_layout_switching: false,
             table_layout_switch_start: None,
+            table_layout_reload_pending: false,
 
             // ── 删除CSV版本窗口 ──
             delete_csv_open: false,
