@@ -21,3 +21,4 @@ callgrind.out.*
 # Local secrets / dotenv
 .env
 .secrets.env
+.hermes-pet-build/
