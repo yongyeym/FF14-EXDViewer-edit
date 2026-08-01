@@ -21,7 +21,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// 配置内容：表名 -> [(yml列名, 中文显示标题)]，数组顺序即展示顺序
-pub type ColumnLayout = HashMap<String, Vec<(String, String)>>;
+/// 内部以 serde_json::Value 存储（允许 `_说明`/`_示例` 等辅助键）
+pub type ColumnLayout = HashMap<String, serde_json::Value>;
 
 /// config/column_layout.json 路径（exe 目录下）
 pub fn layout_path() -> PathBuf {
@@ -66,16 +67,29 @@ pub fn ensure_default_layout_file() {
     }
 }
 
-/// 查询某数据表的列布局；未配置时返回 None。
+/// 查询某数据表的列布局；未配置或格式非法时返回 None。
 /// 返回 [(yml列名, 中文显示标题)]，顺序即展示顺序。
 pub fn get_sheet_columns(layout: &ColumnLayout, sheet_name: &str) -> Option<Vec<(String, String)>> {
-    layout
-        .get(sheet_name)
-        .map(|cols| {
-            cols.iter()
-                .filter(|(name, _)| !name.starts_with('_'))
-                .cloned()
-                .collect()
+    let value = layout.get(sheet_name)?;
+    let pairs = value.as_array()?;
+    let cols: Vec<(String, String)> = pairs
+        .iter()
+        .filter_map(|item| {
+            let arr = item.as_array()?;
+            if arr.len() < 2 {
+                return None;
+            }
+            let name = arr[0].as_str()?.to_string();
+            if name.starts_with('_') {
+                return None;
+            }
+            let title = arr[1].as_str().unwrap_or(&name).to_string();
+            Some((name, title))
         })
-        .filter(|cols: &Vec<(String, String)>| !cols.is_empty())
+        .collect();
+    if cols.is_empty() {
+        None
+    } else {
+        Some(cols)
+    }
 }
