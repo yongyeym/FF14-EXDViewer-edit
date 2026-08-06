@@ -352,32 +352,21 @@ impl MapViewer {
             ui.add_space(6.0);
         }
 
-        // ── 基本信息：多行多列表格（不显示描述）──
+        // ── 基本信息：多行多列表格（不显示描述），整体居中 ──
         if !row.info.is_empty() {
             egui::Frame::group(ui.style())
                 .inner_margin(egui::Margin::symmetric(12, 8))
                 .show(ui, |ui| {
                     ui.vertical_centered(|ui| {
-                        // 每行 4 项；horizontal 收缩宽度以便整体居中
-                        const PER_ROW: usize = 4;
-                        ui.horizontal(|ui| {
-                            egui::Grid::new("map_info_grid")
-                                .num_columns(PER_ROW * 2)
-                                .spacing([12.0, 4.0])
-                                .striped(true)
-                                .show(ui, |ui| {
-                                    for (i, (label, value)) in row.info.iter().enumerate() {
-                                        ui.label(RichText::new(format!("{label}：")).strong());
-                                        ui.label(value);
-                                        if (i + 1) % PER_ROW == 0 {
-                                            ui.end_row();
-                                        }
-                                    }
-                                    // 最后一行未满则补齐
-                                    if !row.info.is_empty() && row.info.len() % PER_ROW != 0 {
-                                        ui.end_row();
-                                    }
+                        // 每对(标签,值)为一项，内容宽度自适应并居中，超宽自动换行
+                        ui.horizontal_wrapped(|ui| {
+                            for (label, value) in &row.info {
+                                ui.horizontal(|ui| {
+                                    ui.label(RichText::new(format!("{label}：")).strong());
+                                    ui.label(value);
                                 });
+                                ui.add_space(16.0);
+                            }
                         });
                     });
                 });
@@ -388,7 +377,10 @@ impl MapViewer {
         egui::ScrollArea::both()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                let per_row = 4;
+                // 动态列数：每张图 400px 宽 + 间距，按可视宽度决定一行几张（最多4张）
+                let avail_w = ui.available_width();
+                let per_row = ((avail_w / 420.0).floor() as usize).clamp(1, 4);
+                let per_row = per_row.max(1);
                 for chunk in maps.chunks(per_row) {
                     ui.horizontal(|ui| {
                         for sub in chunk {
@@ -818,6 +810,8 @@ async fn load_map_rows(backend: &Backend, lang: Language) -> anyhow::Result<Vec<
         .into_iter()
         .map(|(base, mut raws)| {
             raws.sort_by(|a, b| a.code.cmp(&b.code));
+            // 同一完整短编号的多行（Map表同Id的不同MapIndex变体）对应同一图片文件，去重只留一张
+            raws.dedup_by(|a, b| a.code == b.code);
             // 先提取第一张分图的名称数据（避免借用冲突）
             let first_place = raws[0].place.clone();
             let first_sub = raws[0].place_sub.clone();
@@ -848,7 +842,8 @@ async fn load_map_rows(backend: &Backend, lang: Language) -> anyhow::Result<Vec<
             }
         })
         .collect();
-    rows.sort_by(|a, b| a.display.cmp(&b.display));
+    // 按数据表行号排序（编号大小），显示名称不变
+    rows.sort_by_key(|a| a.row_id);
     Ok(rows)
 }
 
