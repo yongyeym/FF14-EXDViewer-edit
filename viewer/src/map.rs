@@ -320,80 +320,107 @@ impl MapViewer {
         let name = row.name.clone();
         let maps = row.maps.clone();
 
-        ui.add_space(8.0);
-        // 上方：地图中文名（大字体居中）
+        // ── 最上方：地图中文名（标题文本，居中）──
         if !name.is_empty() {
+            ui.add_space(6.0);
             ui.vertical_centered(|ui| {
                 ui.add(egui::Label::new(RichText::new(&name).size(24.0).strong()).wrap());
             });
             ui.add_space(6.0);
         }
 
-        // 基本信息（每项一行，避免重叠）
+        // ── 基本信息：多行多列表格；描述文本量大，单独最后一行整行展示 ──
         if !row.info.is_empty() {
+            let desc = row
+                .info
+                .iter()
+                .find(|(l, _)| l == "描述")
+                .map(|(_, v)| v.clone());
+            let rest: Vec<&(String, String)> = row
+                .info
+                .iter()
+                .filter(|(l, _)| l != "描述")
+                .collect();
             egui::Frame::group(ui.style())
                 .inner_margin(egui::Margin::symmetric(12, 8))
                 .show(ui, |ui| {
-                    egui::Grid::new("map_info_grid")
-                        .num_columns(2)
-                        .spacing([12.0, 4.0])
-                        .striped(true)
-                        .show(ui, |ui| {
-                            for (label, value) in &row.info {
-                                ui.label(RichText::new(format!("{label}：")).strong());
-                                ui.label(value);
-                                ui.end_row();
-                            }
-                        });
+                    if !rest.is_empty() {
+                        // 每行 4 项
+                        const PER_ROW: usize = 4;
+                        egui::Grid::new("map_info_grid")
+                            .num_columns(PER_ROW * 2)
+                            .spacing([12.0, 4.0])
+                            .striped(true)
+                            .show(ui, |ui| {
+                                for (i, (label, value)) in rest.iter().enumerate() {
+                                    ui.label(RichText::new(format!("{label}：")).strong());
+                                    ui.label(value);
+                                    if (i + 1) % PER_ROW == 0 {
+                                        ui.end_row();
+                                    }
+                                }
+                                // 最后一行未满则补齐
+                                if !rest.is_empty() && rest.len() % PER_ROW != 0 {
+                                    ui.end_row();
+                                }
+                            });
+                    }
+                    // 描述：最后一行整行
+                    if let Some(d) = desc {
+                        ui.add_space(2.0);
+                        ui.label(RichText::new("描述：").strong());
+                        ui.add(egui::Label::new(egui::RichText::new(d)).wrap());
+                    }
                 });
             ui.add_space(6.0);
         }
 
-        // 地图图片：分图并排（多行多列）
-        ui.vertical_centered(|ui| {
-            let avail_w = ui.available_width().max(100.0);
-            // 每行最多 2 张（分图多时多行）
-            let per_row = if maps.len() >= 3 { 2 } else { maps.len().max(1) };
-            for chunk in maps.chunks(per_row) {
-                ui.horizontal(|ui| {
-                    for sub in chunk {
-                        ui.vertical(|ui| {
-                            let cell_w = (avail_w / per_row as f32).min(420.0) - 12.0;
-                            match self.get_or_load_image(ui, &sub.code, backend) {
-                                MapImage::Loaded(tex) => {
-                                    let (tw, th) = (tex.size()[0] as f32, tex.size()[1] as f32);
-                                    let aspect = th / tw.max(1.0);
-                                    let target_h = (cell_w * aspect).clamp(100.0, 480.0);
-                                    ui.add(
-                                        egui::Image::new(
-                                            egui::load::SizedTexture::from_handle(&tex),
-                                        )
-                                        .fit_to_exact_size(Vec2::new(cell_w, target_h)),
-                                    );
-                                }
-                                MapImage::Loading => {
-                                    ui.spinner();
-                                    ui.label("加载中...");
-                                }
-                                MapImage::Failed(e) => {
-                                    ui.colored_label(
-                                        egui::Color32::RED,
-                                        format!("加载失败: {e}"),
-                                    );
-                                }
+        // ── 地图图片：等大展示，超出范围滚动 ──
+        egui::ScrollArea::both()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.vertical_centered(|ui| {
+                    let per_row = 4;
+                    for chunk in maps.chunks(per_row) {
+                        ui.horizontal(|ui| {
+                            for sub in chunk {
+                                ui.vertical(|ui| {
+                                    ui.vertical_centered(|ui| {
+                                        // 统一 400x400 展示框（地图为方形，保持等大）
+                                        match self.get_or_load_image(ui, &sub.code, backend) {
+                                            MapImage::Loaded(tex) => {
+                                                ui.add(
+                                                    egui::Image::new(
+                                                        egui::load::SizedTexture::from_handle(
+                                                            &tex,
+                                                        ),
+                                                    )
+                                                    .max_size(Vec2::new(400.0, 400.0)),
+                                                );
+                                            }
+                                            MapImage::Loading => {
+                                                ui.spinner();
+                                                ui.label("加载中...");
+                                            }
+                                            MapImage::Failed(e) => {
+                                                ui.colored_label(
+                                                    egui::Color32::RED,
+                                                    format!("加载失败: {e}"),
+                                                );
+                                            }
+                                        }
+                                        // 下方：短编号 + 保存按钮（居中）
+                                        ui.label(RichText::new(&sub.display).strong());
+                                        if ui.button("保存地图").clicked() {
+                                            event = Some(MapEvent::ExportOne(sub.code.clone()));
+                                        }
+                                    });
+                                });
                             }
-                            // 下方标注短编号 + 保存按钮
-                            ui.horizontal(|ui| {
-                                ui.label(RichText::new(&sub.display).strong());
-                                if ui.button("保存地图").clicked() {
-                                    event = Some(MapEvent::ExportOne(sub.code.clone()));
-                                }
-                            });
                         });
                     }
                 });
-            }
-        });
+            });
 
         event
     }
@@ -486,20 +513,20 @@ async fn load_map_rows(backend: &Backend, lang: Language) -> anyhow::Result<Vec<
         map_sheet,
         map_schema,
     );
-    let mut map_id_off: Option<u32> = None;
-    let mut map_tt_off: Option<u32> = None;
-    let mut map_place_off: Option<u32> = None;
+    let mut map_id_ci: Option<u32> = None;
+    let mut map_tt_ci: Option<u32> = None;
+    let mut map_place_ci: Option<u32> = None;
     for ci in 0..map_ctx.column_count() {
-        if let Ok(((sc, shc), _)) = map_ctx.get_column_by_index(ci as u32) {
+        if let Ok(((sc, _), _)) = map_ctx.get_column_by_index(ci as u32) {
             match sc.name() {
-                "Id" => map_id_off = Some(shc.offset() as u32),
-                "TerritoryType" => map_tt_off = Some(shc.offset() as u32),
-                "PlaceName" => map_place_off = Some(shc.offset() as u32),
+                "Id" => map_id_ci = Some(ci as u32),
+                "TerritoryType" => map_tt_ci = Some(ci as u32),
+                "PlaceName" => map_place_ci = Some(ci as u32),
                 _ => {}
             }
         }
     }
-    let Some(map_id_off) = map_id_off else {
+    let Some(map_id_ci) = map_id_ci else {
         anyhow::bail!("Map 表未找到 Id 列");
     };
 
@@ -518,16 +545,16 @@ async fn load_map_rows(backend: &Backend, lang: Language) -> anyhow::Result<Vec<
             place_sheet,
             place_schema,
         );
-        let mut place_name_off: Option<u32> = None;
+        let mut place_name_ci: Option<u32> = None;
         for ci in 0..place_ctx.column_count() {
-            if let Ok(((sc, shc), _)) = place_ctx.get_column_by_index(ci as u32) {
+            if let Ok(((sc, _), _)) = place_ctx.get_column_by_index(ci as u32) {
                 if sc.name() == "Name" {
-                    place_name_off = Some(shc.offset() as u32);
+                    place_name_ci = Some(ci as u32);
                     break;
                 }
             }
         }
-        if let Some(off) = place_name_off {
+        if let Some(off) = place_name_ci {
             for row_id in place_ctx.sheet().get_row_ids() {
                 if let Ok(row) = place_ctx.sheet().get_row(row_id) {
                     if let Ok(cell) = place_ctx.cell_by_offset(row, off) {
@@ -568,20 +595,20 @@ async fn load_map_rows(backend: &Backend, lang: Language) -> anyhow::Result<Vec<
         ("AllowUndersized", "允许解限"),
     ];
     let mut cfc_col_offsets: HashMap<String, u32> = HashMap::new();
-    let mut cfc_tt_off: Option<u32> = None;
+    let mut cfc_tt_ci: Option<u32> = None;
     for ci in 0..cfc_ctx.column_count() {
-        if let Ok(((sc, shc), _)) = cfc_ctx.get_column_by_index(ci as u32) {
+        if let Ok(((sc, _), _)) = cfc_ctx.get_column_by_index(ci as u32) {
             let name = sc.name().to_string();
             if name == "TerritoryType" {
-                cfc_tt_off = Some(shc.offset() as u32);
+                cfc_tt_ci = Some(ci as u32);
             } else if col_labels.iter().any(|(n, _)| *n == name) {
-                cfc_col_offsets.insert(name, shc.offset() as u32);
+                cfc_col_offsets.insert(name, ci as u32);
             }
         }
     }
     // CFC: TerritoryType -> (row_id, info)
     let mut cfc_by_tt: HashMap<String, (u32, Vec<(String, String)>)> = HashMap::new();
-    if let Some(tt_off) = cfc_tt_off {
+    if let Some(tt_off) = cfc_tt_ci {
         for row_id in cfc_ctx.sheet().get_row_ids() {
             let Ok(row) = cfc_ctx.sheet().get_row(row_id) else { continue };
             let tt = cfc_ctx
@@ -617,17 +644,17 @@ async fn load_map_rows(backend: &Backend, lang: Language) -> anyhow::Result<Vec<
     for row_id in map_ctx.sheet().get_row_ids() {
         let Ok(row) = map_ctx.sheet().get_row(row_id) else { continue };
         let code = map_ctx
-            .cell_by_offset(row, map_id_off)
+            .cell_by_offset(row, map_id_ci)
             .map(|c| c.value_string())
             .unwrap_or_default();
         if code.is_empty() {
             continue;
         }
-        let tt = map_tt_off
+        let tt = map_tt_ci
             .and_then(|off| map_ctx.cell_by_offset(row, off).ok())
             .map(|c| c.value_string())
             .unwrap_or_default();
-        let place = map_place_off
+        let place = map_place_ci
             .and_then(|off| map_ctx.cell_by_offset(row, off).ok())
             .map(|c| c.value_string())
             .and_then(|id| place_names.get(&id).cloned())
@@ -652,16 +679,12 @@ async fn load_map_rows(backend: &Backend, lang: Language) -> anyhow::Result<Vec<
             raws.sort_by(|a, b| a.code.cmp(&b.code));
             let first = &raws[0];
             let name = first.place.clone();
-            let (cfc_row_id, info) = match cfc_by_tt.get(&first.tt) {
+            let (cfc_row_id, mut info) = match cfc_by_tt.get(&first.tt) {
                 Some(v) => v.clone(),
-                None => {
-                    let info = vec![
-                        ("编号".to_string(), first.row_id.to_string()),
-                        ("短编号".to_string(), display_code(&base)),
-                    ];
-                    (first.row_id, info)
-                }
+                None => (first.row_id, vec![("编号".to_string(), first.row_id.to_string())]),
             };
+            // 统一：编号 之后是 短编号
+            info.insert(1, ("短编号".to_string(), display_code(&base)));
             let maps: Vec<MapSub> = raws
                 .into_iter()
                 .map(|raw| MapSub {
