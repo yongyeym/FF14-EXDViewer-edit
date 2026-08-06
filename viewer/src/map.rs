@@ -352,51 +352,33 @@ impl MapViewer {
             ui.add_space(6.0);
         }
 
-        // ── 基本信息：多行多列表格；描述文本量大，单独最后一行整行展示 ──
+        // ── 基本信息：多行多列表格（不显示描述）──
         if !row.info.is_empty() {
-            let desc = row
-                .info
-                .iter()
-                .find(|(l, _)| l == "描述")
-                .map(|(_, v)| v.clone());
-            let rest: Vec<&(String, String)> = row
-                .info
-                .iter()
-                .filter(|(l, _)| l != "描述")
-                .collect();
             egui::Frame::group(ui.style())
                 .inner_margin(egui::Margin::symmetric(12, 8))
                 .show(ui, |ui| {
                     ui.vertical_centered(|ui| {
-                    if !rest.is_empty() {
                         // 每行 4 项；horizontal 收缩宽度以便整体居中
                         const PER_ROW: usize = 4;
                         ui.horizontal(|ui| {
-                        egui::Grid::new("map_info_grid")
-                            .num_columns(PER_ROW * 2)
-                            .spacing([12.0, 4.0])
-                            .striped(true)
-                            .show(ui, |ui| {
-                                for (i, (label, value)) in rest.iter().enumerate() {
-                                    ui.label(RichText::new(format!("{label}：")).strong());
-                                    ui.label(value);
-                                    if (i + 1) % PER_ROW == 0 {
+                            egui::Grid::new("map_info_grid")
+                                .num_columns(PER_ROW * 2)
+                                .spacing([12.0, 4.0])
+                                .striped(true)
+                                .show(ui, |ui| {
+                                    for (i, (label, value)) in row.info.iter().enumerate() {
+                                        ui.label(RichText::new(format!("{label}：")).strong());
+                                        ui.label(value);
+                                        if (i + 1) % PER_ROW == 0 {
+                                            ui.end_row();
+                                        }
+                                    }
+                                    // 最后一行未满则补齐
+                                    if !row.info.is_empty() && row.info.len() % PER_ROW != 0 {
                                         ui.end_row();
                                     }
-                                }
-                                // 最后一行未满则补齐
-                                if !rest.is_empty() && rest.len() % PER_ROW != 0 {
-                                    ui.end_row();
-                                }
-                            });
+                                });
                         });
-                    }
-                    // 描述：最后一行整行
-                    if let Some(d) = desc {
-                        ui.add_space(2.0);
-                        ui.label(RichText::new("描述：").strong());
-                        ui.add(egui::Label::new(egui::RichText::new(d)).wrap());
-                    }
                     });
                 });
             ui.add_space(6.0);
@@ -609,49 +591,6 @@ async fn load_map_links(backend: &Backend, lang: Language, version: &str) -> Map
     links
 }
 
-/// 读取 ContentFinderConditionTransient 表的 行号→Description 映射（每次读取）
-async fn read_transient_map(backend: &Backend, lang: Language) -> HashMap<String, String> {
-    let mut map = HashMap::new();
-    if let Ok(sheet) = backend.excel().get_sheet("ContentFinderConditionTransient", lang).await {
-        let editable =
-            crate::config_file::load_schema_for_export(backend, "ContentFinderConditionTransient")
-                .await;
-        let schema = editable.as_ref().and_then(|e| e.get_schema());
-        let ctx = TableContext::new(
-            GlobalContext::new(
-                egui::Context::default(),
-                backend.clone(),
-                lang,
-                crate::utils::IconManager::new(),
-            ),
-            sheet,
-            schema,
-        );
-        let mut desc_ci: Option<u32> = None;
-        for ci in 0..ctx.column_count() {
-            if let Ok(((sc, _), offset_idx)) = ctx.get_column_by_index(ci as u32) {
-                if sc.name() == "Description" {
-                    desc_ci = Some(offset_idx);
-                    break;
-                }
-            }
-        }
-        if let Some(ci) = desc_ci {
-            for row_id in ctx.sheet().get_row_ids() {
-                if let Ok(row) = ctx.sheet().get_row(row_id) {
-                    if let Ok(cell) = ctx.cell_by_offset(row, ci) {
-                        let v = cell.value_string();
-                        if !v.is_empty() {
-                            map.insert(row_id.to_string(), v);
-                        }
-                    }
-                }
-            }
-        }
-    }
-    map
-}
-
 /// 读取地图列表。
 /// 短编号来自 Map 表的 Id 列；名称来自 PlaceName 表（经 Map.PlaceName 链接）；
 /// 基本信息尽力从 ContentFinderCondition 表按 TerritoryType 关联补充。
@@ -660,7 +599,6 @@ async fn load_map_rows(backend: &Backend, lang: Language) -> anyhow::Result<Vec<
     // 链接表数据（ContentType/ExVersion/ClassJobCategory 缓存 + 描述每次读取）
     let version = backend.game_version().unwrap_or("local").to_string();
     let links = load_map_links(backend, lang, &version).await;
-    let transient_map = read_transient_map(backend, lang).await;
 
     // ── 读取 Map 表 ──
     let map_sheet = excel.get_sheet("Map", lang).await?;
@@ -751,7 +689,6 @@ async fn load_map_rows(backend: &Backend, lang: Language) -> anyhow::Result<Vec<
     let col_labels: &[(&str, &str)] = &[
         ("ContentType", "类型"),
         ("RequiredExVersion", "资料片"),
-        ("Transient", "描述"),
         ("AcceptClassJobCategory", "限制职能"),
         ("ClassJobLevelRequired", "最低入场等级"),
         ("ClassJobLevelSync", "等级同步"),
@@ -805,10 +742,6 @@ async fn load_map_rows(backend: &Backend, lang: Language) -> anyhow::Result<Vec<
                             .unwrap_or_else(|| val.clone()),
                         "AcceptClassJobCategory" => links
                             .class_job
-                            .get(&val)
-                            .cloned()
-                            .unwrap_or_else(|| val.clone()),
-                        "Transient" => transient_map
                             .get(&val)
                             .cloned()
                             .unwrap_or_else(|| val.clone()),

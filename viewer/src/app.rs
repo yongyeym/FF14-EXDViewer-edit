@@ -2890,9 +2890,8 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                         log::error!("读取地图 {code} 失败: {e}");
                     }
                 }
-                if i % 5 == 0 {
-                    crate::utils::yield_to_ui().await;
-                }
+                // 每张图后让出一帧（地图解码为同步阻塞，需频繁让出保持UI响应）
+                crate::utils::yield_to_ui().await;
             }
             if let Some(p) = progress.lock().unwrap().as_mut() {
                 p.done = true;
