@@ -8,7 +8,7 @@
 use std::collections::{HashMap, HashSet};
 
 use eframe::egui;
-use image::RgbaImage;
+use egui::{Align, Button, Layout, TextEdit, Vec2, containers::panel::Panel};use image::RgbaImage;
 use ironworks::excel::Language;
 
 use crate::backend::Backend;
@@ -54,6 +54,8 @@ pub struct MapViewer {
     images: HashMap<String, MapImage>,
     /// 进行中的图片加载 promise
     image_promises: HashMap<String, TrackedPromise<anyhow::Result<RgbaImage>>>,
+    /// 地图列表加载 promise（跨帧复用，避免每帧重建）
+    load_promise: Option<TrackedPromise<anyhow::Result<Vec<MapRow>>>>,
 }
 
 impl Default for MapViewer {
@@ -67,6 +69,7 @@ impl Default for MapViewer {
             load_state: LoadState::Loading,
             images: HashMap::new(),
             image_promises: HashMap::new(),
+            load_promise: None,
         }
     }
 }
@@ -98,6 +101,7 @@ pub fn load_error(viewer: &MapViewer) -> Option<&str> {
 impl MapViewer {
     /// 触发地图列表加载（首次或失败重试时调用）
     pub fn request_load(&mut self) {
+        self.load_promise = None;
         if !matches!(self.load_state, LoadState::Loading) {
             self.load_state = LoadState::Loading;
         }
@@ -107,27 +111,28 @@ impl MapViewer {
         if !matches!(self.load_state, LoadState::Loading) {
             return;
         }
-        let backend_for_promise = backend.clone();
-        let promise = TrackedPromise::spawn_local(async move {
-            load_map_rows(&backend_for_promise, lang).await
-        });
-        // spawn_local 的任务在同一次 tick 内执行到第一个挂起点；
-        // 单表读取量小，等待其完成
-        if let Some(result) = promise.try_get() {
-            match result {
-                Ok(rows) => {
-                    self.rows = rows.clone();
-                    self.load_state = LoadState::Ready;
-                    self.after_load(backend.clone());
+        // 只在没有进行中的加载任务时启动（不能每帧重建 promise）
+        if self.load_promise.is_none() {
+            let backend_for_promise = backend.clone();
+            self.load_promise = Some(TrackedPromise::spawn_local(async move {
+                load_map_rows(&backend_for_promise, lang).await
+            }));
+        }
+        // 每帧检查同一个 promise 是否完成
+        if let Some(promise) = self.load_promise.as_mut() {
+            if let Some(result) = promise.try_get() {
+                match result {
+                    Ok(rows) => {
+                        self.rows = rows.clone();
+                        self.load_state = LoadState::Ready;
+                        self.after_load(backend.clone());
+                    }
+                    Err(e) => {
+                        self.load_state = LoadState::Error(e.to_string());
+                    }
                 }
-                Err(e) => {
-                    self.load_state = LoadState::Error(e.to_string());
-                }
+                self.load_promise = None;
             }
-        } else {
-            // 未完成：保留当前状态，下一帧继续（poll_load 每帧调用）
-            self.load_state = LoadState::Loading;
-            self.image_promises.clear();
         }
     }
 
@@ -185,21 +190,36 @@ impl MapViewer {
             if !is_open {
                 return;
             }
+            Panel::top("map_list_header").show(ui, |ui| {
                 ui.add_space(4.0);
-                // 筛选文本框
-                ui.text_edit_singleline(&mut self.search)
-                    .on_hover_text("筛选地图");
-                // 仅显示新增项
                 ui.horizontal(|ui| {
-                    let new_count = self.new_codes.len();
-                    ui.checkbox(&mut self.show_new_only, "仅显示新增项")
-                        .on_hover_text(if new_count > 0 {
-                            format!("当前版本新增 {new_count} 个地图")
-                        } else {
-                            "当前版本无新增地图".into()
-                        });
+                    ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                        CollapsibleSidePanel::draw_arrow(ui, "map_list");
+                        ui.vertical_centered_justified(|ui| ui.heading("地图"));
+                    });
                 });
                 ui.add_space(4.0);
+                ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                    if ui
+                        .add_enabled(!self.search.is_empty(), Button::new("↩"))
+                        .on_hover_text("清除")
+                        .clicked()
+                    {
+                        self.search.clear();
+                    }
+                    // 仅显示新增项（单符号按钮，与其他列表一致）
+                    let new_count = self.new_codes.len();
+                    if new_count > 0 {
+                        ui.toggle_value(&mut self.show_new_only, "🔍")
+                            .on_hover_text(format!("仅显示新增项（{new_count} 项）"));
+                    }
+                    ui.add_sized(
+                        Vec2::new(ui.available_width(), 0.0),
+                        TextEdit::singleline(&mut self.search).hint_text("筛选"),
+                    );
+                });
+                ui.add_space(4.0);
+            });
 
                 match &self.load_state {
                     LoadState::Loading => {
