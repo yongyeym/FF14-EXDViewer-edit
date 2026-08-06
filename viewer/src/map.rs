@@ -362,7 +362,13 @@ impl MapViewer {
                         ui.horizontal_wrapped(|ui| {
                             for (label, value) in &row.info {
                                 ui.horizontal(|ui| {
-                                    ui.label(RichText::new(format!("{label}：")).strong());
+                                    // 标签用强调色，与内容值区分
+                                    let accent = ui.visuals().hyperlink_color;
+                                    ui.label(
+                                        RichText::new(format!("{label}："))
+                                            .strong()
+                                            .color(accent),
+                                    );
                                     ui.label(value);
                                 });
                                 ui.add_space(16.0);
@@ -722,11 +728,17 @@ async fn load_map_rows(backend: &Backend, lang: Language) -> anyhow::Result<Vec<
                         .unwrap_or_default();
                     // 链接列显示引用表的数据（而非原始行号）
                     let display = match *col_name {
-                        "ContentType" => links
-                            .content_type
-                            .get(&val)
-                            .cloned()
-                            .unwrap_or_else(|| val.clone()),
+                        "ContentType" => {
+                            if val == "0" {
+                                "地域地图".to_string()
+                            } else {
+                                links
+                                    .content_type
+                                    .get(&val)
+                                    .cloned()
+                                    .unwrap_or_else(|| val.clone())
+                            }
+                        }
                         "RequiredExVersion" => links
                             .ex_version
                             .get(&val)
@@ -842,8 +854,12 @@ async fn load_map_rows(backend: &Backend, lang: Language) -> anyhow::Result<Vec<
             }
         })
         .collect();
-    // 按数据表行号排序（编号大小），显示名称不变
-    rows.sort_by_key(|a| a.row_id);
+    // 按数据表行号排序（编号大小），编号相同时再按短编号二级排序
+    rows.sort_by(|a, b| {
+        a.row_id
+            .cmp(&b.row_id)
+            .then_with(|| a.display.cmp(&b.display))
+    });
     Ok(rows)
 }
 
