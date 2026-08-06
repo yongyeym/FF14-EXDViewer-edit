@@ -341,10 +341,10 @@ impl MapViewer {
                 .iter()
                 .filter(|(l, _)| l != "描述")
                 .collect();
-            ui.vertical_centered(|ui| {
             egui::Frame::group(ui.style())
                 .inner_margin(egui::Margin::symmetric(12, 8))
                 .show(ui, |ui| {
+                    ui.vertical_centered(|ui| {
                     if !rest.is_empty() {
                         // 每行 4 项
                         const PER_ROW: usize = 4;
@@ -372,8 +372,8 @@ impl MapViewer {
                         ui.label(RichText::new("描述：").strong());
                         ui.add(egui::Label::new(egui::RichText::new(d)).wrap());
                     }
+                    });
                 });
-            });
             ui.add_space(6.0);
         }
 
@@ -392,12 +392,12 @@ impl MapViewer {
                                         let (tw, th) = (tex.size()[0] as f32, tex.size()[1] as f32);
                                         let aspect = tw / th.max(1.0);
                                         let w = 400.0 * aspect;
-                                        ui.add(
-                                            egui::Image::new(
-                                                egui::load::SizedTexture::from_handle(&tex),
-                                            )
-                                            .fit_to_exact_size(Vec2::new(w, 400.0)),
+                                        // 用 SizedTexture::new 强制指定展示尺寸（大图等比缩小，小图等比放大）
+                                        let st = egui::load::SizedTexture::new(
+                                            tex.id(),
+                                            Vec2::new(w, 400.0),
                                         );
+                                        ui.add(egui::Image::new(st));
                                     }
                                     MapImage::Loading => {
                                         ui.spinner();
@@ -782,6 +782,17 @@ async fn load_map_rows(backend: &Backend, lang: Language) -> anyhow::Result<Vec<
                             .get(&val)
                             .cloned()
                             .unwrap_or_else(|| val.clone()),
+                        // 等级/装等：0 显示"无限制"
+                        "ClassJobLevelRequired" | "ClassJobLevelSync" | "ItemLevelRequired"
+                        | "ItemLevelSync" => {
+                            if val == "0" { "无限制".to_string() } else { val }
+                        }
+                        // 允许解限：true → √，false → ×
+                        "AllowUndersized" => match val.as_str() {
+                            "1" => "√".to_string(),
+                            "0" => "×".to_string(),
+                            _ => val,
+                        },
                         _ => val,
                     };
                     info.push((label.to_string(), display));
