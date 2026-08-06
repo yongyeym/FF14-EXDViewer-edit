@@ -36,7 +36,22 @@ pub fn load_backend_config() -> Option<BackendConfig> {
     let path = settings_path();
     match std::fs::read_to_string(&path) {
         Ok(content) => match serde_json::from_str::<BackendConfig>(&content) {
-            Ok(config) => {
+            Ok(mut config) => {
+                // 修复：exdschema_url / hca_url 若为空、null 或非 URL 格式，写回默认 URL
+                let mut changed = false;
+                if !is_valid_url(config.exdschema_url.as_deref()) {
+                    config.exdschema_url =
+                        Some(crate::downloader::DEFAULT_EXDSCHEMA_URL.to_string());
+                    changed = true;
+                }
+                if !is_valid_url(config.hca_url.as_deref()) {
+                    config.hca_url = Some(crate::downloader::DEFAULT_HCA_DECODER_URL.to_string());
+                    changed = true;
+                }
+                if changed {
+                    save_backend_config(&config);
+                    log::info!("配置中下载URL无效，已写回默认值: {}", path.display());
+                }
                 log::info!("已加载配置文件: {}", path.display());
                 Some(config)
             }
@@ -50,6 +65,11 @@ pub fn load_backend_config() -> Option<BackendConfig> {
             None
         }
     }
+}
+
+/// 判断字符串是否为合法的 http(s) URL
+fn is_valid_url(s: Option<&str>) -> bool {
+    matches!(s, Some(v) if v.starts_with("http://") || v.starts_with("https://"))
 }
 
 /// Remove settings.json from disk (e.g. during reset).
