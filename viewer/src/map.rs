@@ -354,28 +354,31 @@ impl MapViewer {
 
         // ── 基本信息：多行多列表格（不显示描述），整体居中 ──
         if !row.info.is_empty() {
-            egui::Frame::group(ui.style())
-                .inner_margin(egui::Margin::symmetric(12, 8))
-                .show(ui, |ui| {
-                    ui.vertical_centered(|ui| {
-                        // 每对(标签,值)为一项，内容宽度自适应并居中，超宽自动换行
-                        ui.horizontal_wrapped(|ui| {
-                            for (label, value) in &row.info {
-                                ui.horizontal(|ui| {
-                                    // 标签用强调色，与内容值区分
-                                    let accent = ui.visuals().hyperlink_color;
-                                    ui.label(
-                                        RichText::new(format!("{label}："))
-                                            .strong()
-                                            .color(accent),
-                                    );
-                                    ui.label(value);
-                                });
-                                ui.add_space(16.0);
-                            }
+            // 外层 horizontal 让 Frame 宽度收缩到内容（避免信息少时右侧留空）
+            ui.vertical_centered(|ui| {
+                ui.horizontal(|ui| {
+                    egui::Frame::group(ui.style())
+                        .inner_margin(egui::Margin::symmetric(12, 8))
+                        .show(ui, |ui| {
+                            // 每对(标签,值)为一项，内容宽度自适应并居中，超宽自动换行
+                            ui.horizontal_wrapped(|ui| {
+                                for (label, value) in &row.info {
+                                    ui.horizontal(|ui| {
+                                        // 标签用强调色，与内容值区分
+                                        let accent = ui.visuals().hyperlink_color;
+                                        ui.label(
+                                            RichText::new(format!("{label}："))
+                                                .strong()
+                                                .color(accent),
+                                        );
+                                        ui.label(value);
+                                    });
+                                    ui.add_space(16.0);
+                                }
+                            });
                         });
-                    });
                 });
+            });
             ui.add_space(6.0);
         }
 
