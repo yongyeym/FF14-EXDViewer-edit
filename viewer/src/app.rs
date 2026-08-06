@@ -805,7 +805,7 @@ impl App {
                             }
                             if ui.button("保存全部地图图片").clicked() {
                                 if let Some(backend) = self.backend.clone() {
-                                    self.command_export_map(&backend, false);
+                                    self.command_export_map_all(&backend);
                                 }
                                 ui.close();
                             }
@@ -2138,11 +2138,11 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
         {
             match event {
                 crate::map::MapEvent::Select(_) => {}
-                crate::map::MapEvent::ExportCurrent => {
-                    self.command_export_map(&backend, true);
+                crate::map::MapEvent::ExportOne(code) => {
+                    self.command_export_map_one(&backend, &code);
                 }
                 crate::map::MapEvent::ExportAll => {
-                    self.command_export_map(&backend, false);
+                    self.command_export_map_all(&backend);
                 }
             }
         }
@@ -2756,35 +2756,89 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
         log::info!("CSV删除完成，共删除 {deleted_dirs} 个空目录");
     }
 
-    /// 保存地图图片：export_current=true 保存当前选中的一张，false 保存全部。
-    /// 带进度窗口（与其他批量导出一致）。
-    fn command_export_map(&mut self, backend: &Backend, export_current: bool) {
+    /// 保存单张地图（分图）：弹出文件选择器，默认保存位置 export/map/ + 默认文件名
+    fn command_export_map_one(&mut self, backend: &Backend, code: &str) {
+        // 找到该分图对应的行与显示名
+        let (display, name) = match self
+            .map
+            .rows
+            .iter()
+            .find(|r| r.maps.iter().any(|m| m.code == *code))
+        {
+            Some(row) => {
+                let sub = row
+                    .maps
+                    .iter()
+                    .find(|m| m.code == *code)
+                    .map(|m| m.display.clone())
+                    .unwrap_or_else(|| crate::map::display_code(code));
+                (sub, row.name.clone())
+            }
+            None => (crate::map::display_code(code), String::new()),
+        };
+        let default_dir = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|p| p.join("export").join("map")))
+            .unwrap_or_else(|| std::path::PathBuf::from("export/map"));
+        let _ = std::fs::create_dir_all(&default_dir);
+        let default_name = crate::map::map_file_name(&display, &name);
+
+        let code_owned = code.to_string();
+        let files = backend.files().clone();
+        self.export_promise = Some(TrackedPromise::spawn_local(async move {
+            // 弹出文件选择器（默认保存位置 + 默认文件名）
+            let picked = rfd::AsyncFileDialog::new()
+                .set_title("保存地图")
+                .set_directory(&default_dir)
+                .set_file_name(&default_name)
+                .add_filter("PNG 图片", &["png"])
+                .save_file()
+                .await;
+            let Some(path) = picked.map(|h| h.path().to_path_buf()) else {
+                log::info!("用户取消保存地图");
+                return;
+            };
+            match crate::map::load_map_texture(&*files, &code_owned).await {
+                Ok(img) => {
+                    if image::DynamicImage::ImageRgba8(img).save(&path).is_ok() {
+                        log::info!("地图已保存: {}", path.display());
+                    } else {
+                        log::error!("保存地图失败: {}", path.display());
+                    }
+                }
+                Err(e) => {
+                    log::error!("读取地图 {code_owned} 失败: {e}");
+                }
+            }
+        }));
+    }
+
+    /// 保存全部地图：自动保存到 exe目录/export/map/，带进度窗口（与其他批量导出一致）。
+    fn command_export_map_all(&mut self, backend: &Backend) {
         let export_dir = std::env::current_exe()
             .ok()
             .and_then(|p| p.parent().map(|p| p.join("export").join("map")))
             .unwrap_or_else(|| std::path::PathBuf::from("export/map"));
         let _ = std::fs::create_dir_all(&export_dir);
 
-        let maps: Vec<crate::map::MapRow> = if export_current {
-            self.map
-                .selected
-                .and_then(|i| self.map.rows.get(i).cloned())
-                .into_iter()
-                .collect()
-        } else {
-            self.map.rows.clone()
-        };
-        if maps.is_empty() {
+        // 收集全部（组 × 分图）
+        let mut targets: Vec<(String, String)> = Vec::new(); // (原始code, 显示名)
+        for row in &self.map.rows {
+            for sub in &row.maps {
+                targets.push((sub.code.clone(), row.name.clone()));
+            }
+        }
+        if targets.is_empty() {
             log::info!("没有可导出的地图");
             return;
         }
-        let total = maps.len();
-        log::info!("开始导出地图（{}），共 {total} 个", if export_current { "当前" } else { "全部" });
+        let total = targets.len();
+        log::info!("开始导出全部地图，共 {total} 个");
 
         let progress = self.export_progress.clone();
         *progress.lock().unwrap() = Some(ExportProgress {
             active: true,
-            title: if export_current { "保存地图".into() } else { "保存全部地图".into() },
+            title: "保存全部地图".into(),
             current: 0,
             total,
             current_name: String::new(),
@@ -2797,7 +2851,7 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
         let files = backend.files().clone();
         self.export_promise = Some(TrackedPromise::spawn_local(async move {
             let mut saved = 0usize;
-            for (i, m) in maps.iter().enumerate() {
+            for (i, (code, name)) in targets.iter().enumerate() {
                 // 检查中断导出请求
                 if progress.lock().unwrap().as_ref().map_or(false, |p| {
                     p.cancel.load(std::sync::atomic::Ordering::Relaxed)
@@ -2812,23 +2866,21 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                 }
                 if let Some(p) = progress.lock().unwrap().as_mut() {
                     p.current = i + 1;
-                    p.current_name = m.code.clone();
+                    p.current_name = crate::map::display_code(code);
                 }
-                match crate::map::load_map_texture(&*files, &m.code).await {
+                match crate::map::load_map_texture(&*files, code).await {
                     Ok(img) => {
-                        let fname = crate::map::map_file_name(m);
+                        let fname =
+                            crate::map::map_file_name(&crate::map::display_code(code), name);
                         let out_path = export_dir.join(&fname);
-                        if image::DynamicImage::ImageRgba8(img)
-                            .save(&out_path)
-                            .is_ok()
-                        {
+                        if image::DynamicImage::ImageRgba8(img).save(&out_path).is_ok() {
                             saved += 1;
                         } else {
                             log::error!("保存地图 {fname} 失败");
                         }
                     }
                     Err(e) => {
-                        log::error!("读取地图 {} 失败: {e}", m.code);
+                        log::error!("读取地图 {code} 失败: {e}");
                     }
                 }
                 if i % 5 == 0 {
