@@ -228,11 +228,14 @@ impl MapViewer {
                     {
                         self.search.clear();
                     }
-                    // 仅显示新增项（单符号按钮，与其他列表一致）
+                    // 仅显示新增项（单符号按钮，始终显示；无新增时禁用）
                     let new_count = self.new_codes.len();
                     if new_count > 0 {
                         ui.toggle_value(&mut self.show_new_only, "🔍")
                             .on_hover_text(format!("仅显示新增项（{new_count} 项）"));
+                    } else {
+                        ui.add_enabled(false, Button::new("🔍"))
+                            .on_hover_text("当前版本无新增地图");
                     }
                     ui.add_sized(
                         Vec2::new(ui.available_width(), 0.0),
@@ -304,6 +307,14 @@ impl MapViewer {
 
         // ── 右侧预览 ──
         egui::CentralPanel::default().show(ui, |ui| {
+            // 折叠后左上角提供重新展开按钮（与其他列表一致）
+            if CollapsibleSidePanel::is_collapsed(ui.ctx(), "map_list") {
+                Panel::top("map_reexpand").show(ui, |ui| {
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| CollapsibleSidePanel::draw_arrow(ui, "map_list"));
+                    ui.add_space(4.0);
+                });
+            }
             if let Some(e) = self.draw_preview(ui, backend) {
                 event = Some(e);
             }
@@ -943,22 +954,29 @@ pub async fn load_map_texture(
     Ok(image)
 }
 
-/// 导出文件名：`{显示短编号} - {名称}.png`（无名称时仅 `{显示短编号}.png`）
-pub fn map_file_name(display: &str, name: &str) -> String {
-    let safe_name: String = name
-        .chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c == '-' || c == '_' || c == ' ' || c == '（' || c == '）' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    let safe_name = safe_name.trim();
+/// 导出文件名：`{显示短编号} - {名称}.png`；有二级地名则为
+/// `{显示短编号} - {名称} - {二级地名}.png`（无名称时仅 `{显示短编号}.png`）
+pub fn map_file_name(display: &str, name: &str, name_sub: &str) -> String {
+    let safe = |s: &str| -> String {
+        s.chars()
+            .map(|c| {
+                if c.is_alphanumeric() || c == '-' || c == '_' || c == ' ' || c == '（' || c == '）' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect::<String>()
+            .trim()
+            .to_string()
+    };
+    let safe_name = safe(name);
+    let safe_sub = safe(name_sub);
     if safe_name.is_empty() {
         format!("{display}.png")
-    } else {
+    } else if safe_sub.is_empty() {
         format!("{display} - {safe_name}.png")
+    } else {
+        format!("{display} - {safe_name} - {safe_sub}.png")
     }
 }

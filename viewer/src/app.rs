@@ -2759,7 +2759,7 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
     /// 保存单张地图（分图）：弹出文件选择器，默认保存位置 export/map/ + 默认文件名
     fn command_export_map_one(&mut self, backend: &Backend, code: &str) {
         // 找到该分图对应的行与显示名
-        let (display, name) = match self
+        let (display, name, name_sub) = match self
             .map
             .rows
             .iter()
@@ -2772,16 +2772,20 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                     .find(|m| m.code == *code)
                     .map(|m| m.display.clone())
                     .unwrap_or_else(|| crate::map::display_code(code));
-                (sub, row.name.clone())
+                (sub, row.name.clone(), row.name_sub.clone())
             }
-            None => (crate::map::display_code(code), String::new()),
+            None => (
+                crate::map::display_code(code),
+                String::new(),
+                String::new(),
+            ),
         };
         let default_dir = std::env::current_exe()
             .ok()
             .and_then(|p| p.parent().map(|p| p.join("export").join("map")))
             .unwrap_or_else(|| std::path::PathBuf::from("export/map"));
         let _ = std::fs::create_dir_all(&default_dir);
-        let default_name = crate::map::map_file_name(&display, &name);
+        let default_name = crate::map::map_file_name(&display, &name, &name_sub);
 
         let code_owned = code.to_string();
         let files = backend.files().clone();
@@ -2822,10 +2826,10 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
         let _ = std::fs::create_dir_all(&export_dir);
 
         // 收集全部（组 × 分图）
-        let mut targets: Vec<(String, String)> = Vec::new(); // (原始code, 显示名)
+        let mut targets: Vec<(String, String, String)> = Vec::new(); // (原始code, 名称, 二级名称)
         for row in &self.map.rows {
             for sub in &row.maps {
-                targets.push((sub.code.clone(), row.name.clone()));
+                targets.push((sub.code.clone(), row.name.clone(), row.name_sub.clone()));
             }
         }
         if targets.is_empty() {
@@ -2851,7 +2855,7 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
         let files = backend.files().clone();
         self.export_promise = Some(TrackedPromise::spawn_local(async move {
             let mut saved = 0usize;
-            for (i, (code, name)) in targets.iter().enumerate() {
+            for (i, (code, name, name_sub)) in targets.iter().enumerate() {
                 // 检查中断导出请求
                 if progress.lock().unwrap().as_ref().map_or(false, |p| {
                     p.cancel.load(std::sync::atomic::Ordering::Relaxed)
@@ -2870,8 +2874,11 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                 }
                 match crate::map::load_map_texture(&*files, code).await {
                     Ok(img) => {
-                        let fname =
-                            crate::map::map_file_name(&crate::map::display_code(code), name);
+                        let fname = crate::map::map_file_name(
+                            &crate::map::display_code(code),
+                            name,
+                            name_sub,
+                        );
                         let out_path = export_dir.join(&fname);
                         if image::DynamicImage::ImageRgba8(img).save(&out_path).is_ok() {
                             saved += 1;
