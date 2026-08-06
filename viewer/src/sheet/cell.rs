@@ -176,6 +176,14 @@ impl<'a> Cell<'a> {
         ui.text_style_height(&egui::TextStyle::Body)
     }
 
+    /// 读取单元格文本值（供程序内部读取，如地图信息展示）。
+    /// 使用原始值（不解析链接显示字段）。
+    pub fn value_string(&self) -> String {
+        self.read(false)
+            .map(|value| value.coerce_string().to_string())
+            .unwrap_or_default()
+    }
+
     fn size_text_multiline(&self, ui: &mut egui::Ui, text: &str) -> f32 {
         let _sw = MULTILINE_STOPWATCH.start();
         let mut line_count = wrap_string_lines_estimate(ui, text);

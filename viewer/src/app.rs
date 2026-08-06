@@ -215,6 +215,7 @@ pub struct App {
     goto_window: Option<goto::GoToWindow>,
     about_open: bool,
     music: music::MusicPlayer,
+    map: crate::map::MapViewer,
     last_system_theme: Option<egui::Theme>,
     /// `None` = Latin only
     loaded_cjk: Option<CjkFont>,
@@ -262,6 +263,7 @@ fn create_router(ctx: egui::Context) -> Result<Router<App>> {
     builder.add_route("/sheet", App::on_unnamed_sheet, App::draw_unnamed_sheet)?;
     builder.add_route("/sheet/{*name}", App::on_named_sheet, App::draw_named_sheet)?;
     builder.add_route("/music", App::on_music, App::draw_music)?;
+    builder.add_route("/maps", App::on_maps, App::draw_maps)?;
     builder.add_route("/music/{id}", App::on_music_track, App::draw_music)?;
     builder.add_route(
         CALLBACK_PATH,
@@ -285,10 +287,18 @@ impl App {
             .path()
             .starts_with("/music");
 
-        if !on_music && shortcut::consume(&ctx, GOTO_ROW) {
+        let on_maps = self
+            .router
+            .get()
+            .unwrap()
+            .current_path()
+            .path()
+            .starts_with("/maps");
+
+        if !on_music && !on_maps && shortcut::consume(&ctx, GOTO_ROW) {
             self.goto_window = Some(goto::GoToWindow::to_row());
         }
-        if !on_music && shortcut::consume(&ctx, GOTO_SHEET) {
+        if !on_music && !on_maps && shortcut::consume(&ctx, GOTO_SHEET) {
             self.goto_window = Some(goto::GoToWindow::to_sheet());
         }
 
@@ -296,7 +306,7 @@ impl App {
         self.update_sheet_languages(&ctx);
         self.pr_window.poll(&ctx);
         about::draw(&ctx, &mut self.about_open);
-        self.draw_menubar(ui, on_music);
+        self.draw_menubar(ui, on_music, on_maps);
         self.draw_logger(ui.ctx());
         self.draw_pr_window(ui.ctx());
         self.draw_export_progress_window(ui.ctx());
@@ -460,7 +470,7 @@ impl App {
         }
     }
 
-    fn draw_menubar(&mut self, ui: &mut egui::Ui, on_music: bool) {
+    fn draw_menubar(&mut self, ui: &mut egui::Ui, on_music: bool, on_maps: bool) {
         let ctx = &ui.ctx().clone();
         Panel::top("top_panel")
             .frame(
@@ -793,6 +803,12 @@ impl App {
                                 }
                                 ui.close();
                             }
+                            if ui.button("保存全部地图图片").clicked() {
+                                if let Some(backend) = self.backend.clone() {
+                                    self.command_export_map(&backend, false);
+                                }
+                                ui.close();
+                            }
                             ui.separator();
                             if ui.button("删除指定版本CSV文件").clicked() {
                                 self.delete_csv_versions = crate::diff::find_version_folders();
@@ -823,17 +839,23 @@ impl App {
                     }
 
                     let seg = egui::vec2(72.0, ui.spacing().interact_size.y);
-                    let switcher_w = 2.0 * seg.x + ui.spacing().item_spacing.x;
+                    let switcher_w = 3.0 * seg.x + 2.0 * ui.spacing().item_spacing.x;
                     let target_left = bar_left + bar_width / 2.0 - switcher_w / 2.0;
                     let space = target_left - ui.cursor().left();
                     if space > 0.0 {
                         ui.add_space(space);
                     }
                     if ui
-                        .add_sized(seg, Button::selectable(!on_music, "数据列表"))
+                        .add_sized(seg, Button::selectable(!on_music && !on_maps, "数据列表"))
                         .clicked()
                     {
                         self.navigate("/sheet");
+                    }
+                    if ui
+                        .add_sized(seg, Button::selectable(on_maps, "地图列表"))
+                        .clicked()
+                    {
+                        self.navigate("/maps");
                     }
                     if ui
                         .add_sized(seg, Button::selectable(on_music, "音乐列表"))
@@ -2098,6 +2120,34 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
         }
     }
 
+    fn on_maps(
+        &mut self,
+        _ui: &mut egui::Ui,
+        path: &Path,
+        _params: &Params<'_, '_>,
+    ) -> RouteResponse {
+        if let Some(r) = self.ensure_backend(path) {
+            return r;
+        }
+        RouteResponse::Title("地图".to_string())
+    }
+
+    fn draw_maps(&mut self, ui: &mut egui::Ui, _path: &Path, _params: &Params<'_, '_>) {
+        if let Some(backend) = self.backend.clone()
+            && let Some(event) = self.map.ui(ui, &backend, LANGUAGE.get(ui.ctx()))
+        {
+            match event {
+                crate::map::MapEvent::Select(_) => {}
+                crate::map::MapEvent::ExportCurrent => {
+                    self.command_export_map(&backend, true);
+                }
+                crate::map::MapEvent::ExportAll => {
+                    self.command_export_map(&backend, false);
+                }
+            }
+        }
+    }
+
     fn command_open_pr(&mut self) {
         let names: Vec<String> = self
             .get_modified_schemas()
@@ -2706,6 +2756,93 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
         log::info!("CSV删除完成，共删除 {deleted_dirs} 个空目录");
     }
 
+    /// 保存地图图片：export_current=true 保存当前选中的一张，false 保存全部。
+    /// 带进度窗口（与其他批量导出一致）。
+    fn command_export_map(&mut self, backend: &Backend, export_current: bool) {
+        let export_dir = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|p| p.join("export").join("map")))
+            .unwrap_or_else(|| std::path::PathBuf::from("export/map"));
+        let _ = std::fs::create_dir_all(&export_dir);
+
+        let maps: Vec<crate::map::MapRow> = if export_current {
+            self.map
+                .selected
+                .and_then(|i| self.map.rows.get(i).cloned())
+                .into_iter()
+                .collect()
+        } else {
+            self.map.rows.clone()
+        };
+        if maps.is_empty() {
+            log::info!("没有可导出的地图");
+            return;
+        }
+        let total = maps.len();
+        log::info!("开始导出地图（{}），共 {total} 个", if export_current { "当前" } else { "全部" });
+
+        let progress = self.export_progress.clone();
+        *progress.lock().unwrap() = Some(ExportProgress {
+            active: true,
+            title: if export_current { "保存地图".into() } else { "保存全部地图".into() },
+            current: 0,
+            total,
+            current_name: String::new(),
+            done: false,
+            error: None,
+            done_at: None,
+            cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        });
+
+        let files = backend.files().clone();
+        self.export_promise = Some(TrackedPromise::spawn_local(async move {
+            let mut saved = 0usize;
+            for (i, m) in maps.iter().enumerate() {
+                // 检查中断导出请求
+                if progress.lock().unwrap().as_ref().map_or(false, |p| {
+                    p.cancel.load(std::sync::atomic::Ordering::Relaxed)
+                }) {
+                    log::info!("地图导出已中断");
+                    if let Some(p) = progress.lock().unwrap().as_mut() {
+                        p.done = true;
+                        p.active = false;
+                        p.error = Some("已中断导出".into());
+                    }
+                    return;
+                }
+                if let Some(p) = progress.lock().unwrap().as_mut() {
+                    p.current = i + 1;
+                    p.current_name = m.code.clone();
+                }
+                match crate::map::load_map_texture(&*files, &m.code).await {
+                    Ok(img) => {
+                        let fname = crate::map::map_file_name(m);
+                        let out_path = export_dir.join(&fname);
+                        if image::DynamicImage::ImageRgba8(img)
+                            .save(&out_path)
+                            .is_ok()
+                        {
+                            saved += 1;
+                        } else {
+                            log::error!("保存地图 {fname} 失败");
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("读取地图 {} 失败: {e}", m.code);
+                    }
+                }
+                if i % 5 == 0 {
+                    crate::utils::yield_to_ui().await;
+                }
+            }
+            if let Some(p) = progress.lock().unwrap().as_mut() {
+                p.done = true;
+                p.active = false;
+            }
+            log::info!("地图导出完成：共保存 {saved} 个（目录: {}）", export_dir.display());
+        }));
+    }
+
     fn command_export_music(&mut self, backend: &Backend, export_current: bool) {
         use ironworks::file::scd::{Codec, SoundContainer};
         use std::io::Cursor;
@@ -3041,6 +3178,7 @@ impl App {
             goto_window: None,
             about_open: false,
             music: music::MusicPlayer::default(),
+            map: crate::map::MapViewer::default(),
             last_system_theme: None,
             loaded_cjk: None,
             #[cfg(target_arch = "wasm32")]

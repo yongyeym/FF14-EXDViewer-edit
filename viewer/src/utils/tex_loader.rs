@@ -14,9 +14,14 @@ pub fn read<R: Resource>(ironworks: &Ironworks<R>, path: &str) -> Result<Dynamic
         other => other.context("read file")?,
     };
 
+    decode(texture)
+}
+
+/// 将已读取的 tex 纹理对象解码为图像（与 `read` 共用解码逻辑）。
+pub fn decode(texture: tex::Texture) -> Result<DynamicImage> {
     if !matches!(texture.kind(), tex::TextureKind::D2) {
         anyhow::bail!(
-            "unsupported texture dimension {:?} for path {path}",
+            "unsupported texture dimension {:?}",
             texture.kind()
         );
     }
@@ -37,7 +42,7 @@ pub fn read<R: Resource>(ironworks: &Ironworks<R>, path: &str) -> Result<Dynamic
         tex::Format::Bc7Unorm => read_texture_bc(texture, image_dds::ImageFormat::BC7RgbaUnorm)?,
 
         other => {
-            anyhow::bail!("unsupported texture format {other:?} for path {path}");
+            anyhow::bail!("unsupported texture format {other:?}");
         }
     };
 

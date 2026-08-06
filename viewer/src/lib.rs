@@ -35,6 +35,7 @@ mod editable_schema;
 mod excel;
 mod github;
 mod goto;
+pub mod map;
 mod music;
 mod pr_window;
 mod router;

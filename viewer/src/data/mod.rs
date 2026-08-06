@@ -24,6 +24,12 @@ pub trait FileProvider {
     async fn get_icon(&self, icon_id: u32, hires: bool) -> anyhow::Result<Either<Url, RgbaImage>>;
 
     async fn exists_many(&self, paths: &[String]) -> anyhow::Result<Vec<bool>>;
+
+    /// 读取任意 .tex 纹理文件并解码为 RGBA 图像（地图等非图标纹理用）。
+    /// 默认实现不支持（web/worker 数据源无法直接解码 tex）；sqpack 提供真实实现。
+    async fn read_tex(&self, _path: &str) -> anyhow::Result<RgbaImage> {
+        anyhow::bail!("当前数据源不支持读取纹理文件")
+    }
 }
 
 /// Typed reads layered on [`FileProvider`]. Blanket-implemented for every

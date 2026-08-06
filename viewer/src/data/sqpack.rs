@@ -52,4 +52,9 @@ impl FileProvider for SqpackFileProvider {
         }
         Ok(result)
     }
+
+    async fn read_tex(&self, path: &str) -> anyhow::Result<RgbaImage> {
+        let data = tex_loader::read(&self.0, path)?;
+        Ok(data.into_rgba8())
+    }
 }
