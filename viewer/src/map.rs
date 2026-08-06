@@ -517,11 +517,11 @@ async fn load_map_rows(backend: &Backend, lang: Language) -> anyhow::Result<Vec<
     let mut map_tt_ci: Option<u32> = None;
     let mut map_place_ci: Option<u32> = None;
     for ci in 0..map_ctx.column_count() {
-        if let Ok(((sc, _), _)) = map_ctx.get_column_by_index(ci as u32) {
+        if let Ok(((sc, _), offset_idx)) = map_ctx.get_column_by_index(ci as u32) {
             match sc.name() {
-                "Id" => map_id_ci = Some(ci as u32),
-                "TerritoryType" => map_tt_ci = Some(ci as u32),
-                "PlaceName" => map_place_ci = Some(ci as u32),
+                "Id" => map_id_ci = Some(offset_idx),
+                "TerritoryType" => map_tt_ci = Some(offset_idx),
+                "PlaceName" => map_place_ci = Some(offset_idx),
                 _ => {}
             }
         }
@@ -547,9 +547,9 @@ async fn load_map_rows(backend: &Backend, lang: Language) -> anyhow::Result<Vec<
         );
         let mut place_name_ci: Option<u32> = None;
         for ci in 0..place_ctx.column_count() {
-            if let Ok(((sc, _), _)) = place_ctx.get_column_by_index(ci as u32) {
+            if let Ok(((sc, _), offset_idx)) = place_ctx.get_column_by_index(ci as u32) {
                 if sc.name() == "Name" {
-                    place_name_ci = Some(ci as u32);
+                    place_name_ci = Some(offset_idx);
                     break;
                 }
             }
@@ -597,12 +597,12 @@ async fn load_map_rows(backend: &Backend, lang: Language) -> anyhow::Result<Vec<
     let mut cfc_col_offsets: HashMap<String, u32> = HashMap::new();
     let mut cfc_tt_ci: Option<u32> = None;
     for ci in 0..cfc_ctx.column_count() {
-        if let Ok(((sc, _), _)) = cfc_ctx.get_column_by_index(ci as u32) {
+        if let Ok(((sc, _), offset_idx)) = cfc_ctx.get_column_by_index(ci as u32) {
             let name = sc.name().to_string();
             if name == "TerritoryType" {
-                cfc_tt_ci = Some(ci as u32);
+                cfc_tt_ci = Some(offset_idx);
             } else if col_labels.iter().any(|(n, _)| *n == name) {
-                cfc_col_offsets.insert(name, ci as u32);
+                cfc_col_offsets.insert(name, offset_idx);
             }
         }
     }
