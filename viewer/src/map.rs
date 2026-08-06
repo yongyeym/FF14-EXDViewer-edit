@@ -411,31 +411,102 @@ impl MapViewer {
     }
 }
 
-/// 读取地图列表（ContentFinderCondition 表）。
-/// 读取失败返回 Err（此时调用方回退为仅显示文件名列表）。
+/// 读取地图列表。
+/// 短编号（地图文件名）来自 Map 表的 Id 列（如 f1t1、f1t1_1、f1t1_re）；
+/// 名称与基本信息来自 ContentFinderCondition 表（通过 TerritoryType 关联）。
 async fn load_map_rows(backend: &Backend, lang: Language) -> anyhow::Result<Vec<MapRow>> {
     let excel = backend.excel().clone();
-    let sheet = excel.get_sheet("ContentFinderCondition", lang).await?;
 
-    // 真实 schema（yml）
-    let editable =
-        crate::config_file::load_schema_for_export(backend, "ContentFinderCondition").await;
-    let schema = editable.as_ref().and_then(|e| e.get_schema());
-    let context = TableContext::new(
+    // ── 读取 Map 表（地图文件名/短编号来源）──
+    let map_sheet = excel.get_sheet("Map", lang).await?;
+    let map_editable =
+        crate::config_file::load_schema_for_export(backend, "Map").await;
+    let map_schema = map_editable.as_ref().and_then(|e| e.get_schema());
+    let map_ctx = TableContext::new(
         GlobalContext::new(
             egui::Context::default(),
             backend.clone(),
             lang,
             crate::utils::IconManager::new(),
         ),
-        sheet,
-        schema,
+        map_sheet,
+        map_schema,
+    );
+    // Map 表列 offset：Id（短编号）、TerritoryType（关联键）、PlaceName（名称回退）
+    let mut map_id_off: Option<u32> = None;
+    let mut map_tt_off: Option<u32> = None;
+    let mut map_place_off: Option<u32> = None;
+    for ci in 0..map_ctx.column_count() {
+        if let Ok(((sc, shc), _)) = map_ctx.get_column_by_index(ci as u32) {
+            match sc.name() {
+                "Id" => map_id_off = Some(shc.offset() as u32),
+                "TerritoryType" => map_tt_off = Some(shc.offset() as u32),
+                "PlaceName" => map_place_off = Some(shc.offset() as u32),
+                _ => {}
+            }
+        }
+    }
+    let Some(map_id_off) = map_id_off else {
+        anyhow::bail!("Map 表未找到 Id 列");
+    };
+
+    // ── 读取 PlaceName 表（名称回退）──
+    let mut place_names: HashMap<String, String> = HashMap::new();
+    if let Ok(place_sheet) = excel.get_sheet("PlaceName", lang).await {
+        let place_editable =
+            crate::config_file::load_schema_for_export(backend, "PlaceName").await;
+        let place_schema = place_editable.as_ref().and_then(|e| e.get_schema());
+        let place_ctx = TableContext::new(
+            GlobalContext::new(
+                egui::Context::default(),
+                backend.clone(),
+                lang,
+                crate::utils::IconManager::new(),
+            ),
+            place_sheet,
+            place_schema,
+        );
+        let mut place_name_off: Option<u32> = None;
+        for ci in 0..place_ctx.column_count() {
+            if let Ok(((sc, shc), _)) = place_ctx.get_column_by_index(ci as u32) {
+                if sc.name() == "Name" {
+                    place_name_off = Some(shc.offset() as u32);
+                    break;
+                }
+            }
+        }
+        if let Some(off) = place_name_off {
+            for row_id in place_ctx.sheet().get_row_ids() {
+                if let Ok(row) = place_ctx.sheet().get_row(row_id) {
+                    if let Ok(cell) = place_ctx.cell_by_offset(row, off) {
+                        let name = cell.value_string();
+                        if !name.is_empty() {
+                            place_names.insert(row_id.to_string(), name);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ── 读取 ContentFinderCondition 表（名称与基本信息）──
+    let cfc_sheet = excel.get_sheet("ContentFinderCondition", lang).await?;
+    let cfc_editable =
+        crate::config_file::load_schema_for_export(backend, "ContentFinderCondition").await;
+    let cfc_schema = cfc_editable.as_ref().and_then(|e| e.get_schema());
+    let cfc_ctx = TableContext::new(
+        GlobalContext::new(
+            egui::Context::default(),
+            backend.clone(),
+            lang,
+            crate::utils::IconManager::new(),
+        ),
+        cfc_sheet,
+        cfc_schema,
     );
 
-    // 需要读取的列（按 column_layout.json 中 ContentFinderCondition 配置，
-    // 去掉 副本名称(Name) 和 图片(Image)，短编号(ShortCode) 前加 编号=行号）
+    // CFC 信息列（去掉 副本名称(Name) 和 图片(Image)，短编号用 Map.Id）
     let col_labels: &[(&str, &str)] = &[
-        ("ShortCode", "短编号"),
         ("ContentType", "类型"),
         ("RequiredExVersion", "资料片"),
         ("Transient", "描述"),
@@ -446,55 +517,88 @@ async fn load_map_rows(backend: &Backend, lang: Language) -> anyhow::Result<Vec<
         ("ItemLevelSync", "装等同步"),
         ("AllowUndersized", "允许解限"),
     ];
-
-    // 列名 -> offset
-    let mut col_offsets: HashMap<String, u32> = HashMap::new();
-    let col_count = context.column_count();
-    for ci in 0..col_count {
-        if let Ok(((sc, shc), _)) = context.get_column_by_index(ci as u32) {
+    let mut cfc_col_offsets: HashMap<String, u32> = HashMap::new();
+    let mut cfc_tt_off: Option<u32> = None;
+    for ci in 0..cfc_ctx.column_count() {
+        if let Ok(((sc, shc), _)) = cfc_ctx.get_column_by_index(ci as u32) {
             let name = sc.name().to_string();
-            if col_labels.iter().any(|(n, _)| *n == name) || name == "Name" {
-                col_offsets.insert(name, shc.offset() as u32);
+            if name == "TerritoryType" {
+                cfc_tt_off = Some(shc.offset() as u32);
+            } else if name == "Name" || col_labels.iter().any(|(n, _)| *n == name) {
+                cfc_col_offsets.insert(name, shc.offset() as u32);
             }
         }
     }
+    // CFC: TerritoryType -> (row_id, name, info)
+    let mut cfc_by_tt: HashMap<String, (u32, String, Vec<(String, String)>)> = HashMap::new();
+    if let Some(tt_off) = cfc_tt_off {
+        for row_id in cfc_ctx.sheet().get_row_ids() {
+            let Ok(row) = cfc_ctx.sheet().get_row(row_id) else { continue };
+            let tt = cfc_ctx
+                .cell_by_offset(row, tt_off)
+                .map(|c| c.value_string())
+                .unwrap_or_default();
+            if tt.is_empty() {
+                continue;
+            }
+            let name = cfc_col_offsets
+                .get("Name")
+                .and_then(|&off| cfc_ctx.cell_by_offset(row, off).ok())
+                .map(|c| c.value_string())
+                .unwrap_or_default();
+            let mut info = Vec::new();
+            info.push(("编号".to_string(), row_id.to_string()));
+            for (col_name, label) in col_labels {
+                if let Some(&off) = cfc_col_offsets.get(*col_name) {
+                    let val = cfc_ctx
+                        .cell_by_offset(row, off)
+                        .map(|c| c.value_string())
+                        .unwrap_or_default();
+                    info.push((label.to_string(), val));
+                }
+            }
+            cfc_by_tt.entry(tt).or_insert((row_id, name, info));
+        }
+    }
 
+    // ── 遍历 Map 表组装列表 ──
     let mut rows = Vec::new();
-    for row_id in context.sheet().get_row_ids() {
-        let Ok(row) = context.sheet().get_row(row_id) else {
-            continue;
-        };
-        // 短编号
-        let code = col_offsets
-            .get("ShortCode")
-            .and_then(|&off| context.cell_by_offset(row, off).ok())
+    for row_id in map_ctx.sheet().get_row_ids() {
+        let Ok(row) = map_ctx.sheet().get_row(row_id) else { continue };
+        let code = map_ctx
+            .cell_by_offset(row, map_id_off)
             .map(|c| c.value_string())
             .unwrap_or_default();
         if code.is_empty() {
             continue;
         }
-        // 名称
-        let name = col_offsets
-            .get("Name")
-            .and_then(|&off| context.cell_by_offset(row, off).ok())
+        // 关联 CFC（按 TerritoryType）
+        let tt = map_tt_off
+            .and_then(|off| map_ctx.cell_by_offset(row, off).ok())
             .map(|c| c.value_string())
             .unwrap_or_default();
-        // 基本信息
-        let mut info = Vec::new();
-        info.push(("编号".to_string(), row_id.to_string()));
-        for (col_name, label) in col_labels {
-            if let Some(&off) = col_offsets.get(*col_name) {
-                let val = context
-                    .cell_by_offset(row, off)
+        let (cfc_row_id, cfc_name, info) = match cfc_by_tt.get(&tt) {
+            Some(v) => v.clone(),
+            None => {
+                // 回退：PlaceName 名称，无信息
+                let place_name = map_place_off
+                    .and_then(|off| map_ctx.cell_by_offset(row, off).ok())
                     .map(|c| c.value_string())
+                    .and_then(|id| place_names.get(&id).cloned())
                     .unwrap_or_default();
-                info.push((label.to_string(), val));
+                let info = vec![
+                    ("编号".to_string(), row_id.to_string()),
+                    ("短编号".to_string(), code.clone()),
+                ];
+                (row_id, place_name, info)
             }
-        }
+        };
+        let mut info = info;
+        info.insert(1, ("短编号".to_string(), code.clone()));
         rows.push(MapRow {
             code,
-            name,
-            row_id,
+            name: cfc_name,
+            row_id: cfc_row_id,
             info,
         });
     }
