@@ -386,29 +386,29 @@ impl MapViewer {
         egui::ScrollArea::both()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                // 动态列数：每张图 400px 宽 + 间距，按可视宽度决定一行几张（最多4张）
+                // 动态列数：每张图 800px 宽 + 间距，按可视宽度决定一行几张（最多4张）
                 let avail_w = ui.available_width();
-                let per_row = ((avail_w / 420.0).floor() as usize).clamp(1, 4);
+                let per_row = ((avail_w / 820.0).floor() as usize).clamp(1, 4);
                 let per_row = per_row.max(1);
                 for chunk in maps.chunks(per_row) {
                     ui.horizontal(|ui| {
                         for sub in chunk {
                             ui.vertical(|ui| {
                                 ui.vertical_centered(|ui| {
-                                // 统一缩放为高 400px：大的等比缩小，小的等比放大
+                                // 统一缩放为高 800px：大的等比缩小，小的等比放大
                                 match self.get_or_load_image(ui, &sub.code, backend) {
                                     MapImage::Loaded(tex) => {
                                         let (tw, th) = (tex.size()[0] as f32, tex.size()[1] as f32);
                                         let aspect = tw / th.max(1.0);
-                                        let w = 400.0 * aspect;
+                                        let w = 800.0 * aspect;
                                         // SizedTexture::new 强制尺寸 + fit_to_exact_size 双保险
                                         let st = egui::load::SizedTexture::new(
                                             tex.id(),
-                                            Vec2::new(w, 400.0),
+                                            Vec2::new(w, 800.0),
                                         );
                                         ui.add(
                                             egui::Image::new(st)
-                                                .fit_to_exact_size(Vec2::new(w, 400.0)),
+                                                .fit_to_exact_size(Vec2::new(w, 800.0)),
                                         );
                                     }
                                     MapImage::Loading => {
@@ -894,11 +894,37 @@ pub async fn load_map_texture(
                 }
                 // result[i+3] 保留原 alpha
             }
-            return Ok(RgbaImage::from_raw(w, h, result)
-                .ok_or_else(|| anyhow::anyhow!("无法构建地图图像"))?);
+            let blended = RgbaImage::from_raw(w, h, result)
+                .ok_or_else(|| anyhow::anyhow!("无法构建地图图像"))?;
+            return Ok(trim_transparent(&blended));
         }
     }
-    Ok(image)
+    Ok(trim_transparent(&image))
+}
+
+/// 裁剪图片四周全透明像素，返回内容包围盒区域（2048 固定画布中居中/非方形内容放大展示用）
+fn trim_transparent(img: &RgbaImage) -> RgbaImage {
+    let (w, h) = img.dimensions();
+    let (mut min_x, mut min_y) = (w, h);
+    let (mut max_x, mut max_y) = (0u32, 0u32);
+    let mut found = false;
+    for y in 0..h {
+        for x in 0..w {
+            if img.get_pixel(x, y)[3] > 0 {
+                found = true;
+                min_x = min_x.min(x);
+                max_x = max_x.max(x);
+                min_y = min_y.min(y);
+                max_y = max_y.max(y);
+            }
+        }
+    }
+    if !found {
+        return img.clone();
+    }
+    let cw = max_x - min_x + 1;
+    let ch = max_y - min_y + 1;
+    image::imageops::crop_imm(img, min_x, min_y, cw, ch).to_image()
 }
 
 /// 导出文件名：`{显示短编号} - {名称}.png`；有二级地名则为
