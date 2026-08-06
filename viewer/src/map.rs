@@ -341,6 +341,7 @@ impl MapViewer {
                 .iter()
                 .filter(|(l, _)| l != "描述")
                 .collect();
+            ui.vertical_centered(|ui| {
             egui::Frame::group(ui.style())
                 .inner_margin(egui::Margin::symmetric(12, 8))
                 .show(ui, |ui| {
@@ -372,6 +373,7 @@ impl MapViewer {
                         ui.add(egui::Label::new(egui::RichText::new(d)).wrap());
                     }
                 });
+            });
             ui.add_space(6.0);
         }
 
@@ -379,47 +381,46 @@ impl MapViewer {
         egui::ScrollArea::both()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                ui.vertical_centered(|ui| {
-                    let per_row = 4;
-                    for chunk in maps.chunks(per_row) {
-                        ui.horizontal(|ui| {
-                            for sub in chunk {
-                                ui.vertical(|ui| {
-                                    ui.vertical_centered(|ui| {
-                                        // 统一 400x400 展示框（地图为方形，保持等大）
-                                        match self.get_or_load_image(ui, &sub.code, backend) {
-                                            MapImage::Loaded(tex) => {
-                                                ui.add(
-                                                    egui::Image::new(
-                                                        egui::load::SizedTexture::from_handle(
-                                                            &tex,
-                                                        ),
-                                                    )
-                                                    .max_size(Vec2::new(400.0, 400.0)),
-                                                );
-                                            }
-                                            MapImage::Loading => {
-                                                ui.spinner();
-                                                ui.label("加载中...");
-                                            }
-                                            MapImage::Failed(e) => {
-                                                ui.colored_label(
-                                                    egui::Color32::RED,
-                                                    format!("加载失败: {e}"),
-                                                );
-                                            }
-                                        }
-                                        // 下方：短编号 + 保存按钮（居中）
-                                        ui.label(RichText::new(&sub.display).strong());
-                                        if ui.button("保存地图").clicked() {
-                                            event = Some(MapEvent::ExportOne(sub.code.clone()));
-                                        }
-                                    });
+                let per_row = 4;
+                for chunk in maps.chunks(per_row) {
+                    ui.horizontal(|ui| {
+                        for sub in chunk {
+                            ui.vertical(|ui| {
+                                // 统一缩放为高 400px：大的等比缩小，小的等比放大
+                                match self.get_or_load_image(ui, &sub.code, backend) {
+                                    MapImage::Loaded(tex) => {
+                                        let (tw, th) = (tex.size()[0] as f32, tex.size()[1] as f32);
+                                        let aspect = tw / th.max(1.0);
+                                        let w = 400.0 * aspect;
+                                        ui.add(
+                                            egui::Image::new(
+                                                egui::load::SizedTexture::from_handle(&tex),
+                                            )
+                                            .fit_to_exact_size(Vec2::new(w, 400.0)),
+                                        );
+                                    }
+                                    MapImage::Loading => {
+                                        ui.spinner();
+                                        ui.label("加载中...");
+                                    }
+                                    MapImage::Failed(e) => {
+                                        ui.colored_label(
+                                            egui::Color32::RED,
+                                            format!("加载失败: {e}"),
+                                        );
+                                    }
+                                }
+                                // 下方：短编号 + 保存按钮（居中）
+                                ui.vertical_centered(|ui| {
+                                    ui.label(RichText::new(&sub.display).strong());
+                                    if ui.button("保存地图").clicked() {
+                                        event = Some(MapEvent::ExportOne(sub.code.clone()));
+                                    }
                                 });
-                            }
-                        });
-                    }
-                });
+                            });
+                        }
+                    });
+                }
             });
 
         event
@@ -493,11 +494,145 @@ fn base_code(code: &str) -> String {
     code.to_string()
 }
 
+/// 链接表缓存（ContentType/ExVersion/ClassJobCategory 的行号→Name 映射）。
+/// 这些表长时间才变动一次，缓存到 config/map_links_{version}.json，版本号变动才重新读取。
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+struct MapLinks {
+    #[serde(default)]
+    content_type: HashMap<String, String>,
+    #[serde(default)]
+    ex_version: HashMap<String, String>,
+    #[serde(default)]
+    class_job: HashMap<String, String>,
+}
+
+fn map_links_cache_path(version: &str) -> std::path::PathBuf {
+    let safe = version.replace('.', "_");
+    std::path::PathBuf::from("config").join(format!("map_links_{safe}.json"))
+}
+
+/// 读取一个表的 行号→Name 映射
+async fn read_name_map(
+    backend: &Backend,
+    lang: Language,
+    sheet_name: &str,
+) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    if let Ok(sheet) = backend.excel().get_sheet(sheet_name, lang).await {
+        let editable = crate::config_file::load_schema_for_export(backend, sheet_name).await;
+        let schema = editable.as_ref().and_then(|e| e.get_schema());
+        let ctx = TableContext::new(
+            GlobalContext::new(
+                egui::Context::default(),
+                backend.clone(),
+                lang,
+                crate::utils::IconManager::new(),
+            ),
+            sheet,
+            schema,
+        );
+        let mut name_ci: Option<u32> = None;
+        for ci in 0..ctx.column_count() {
+            if let Ok(((sc, _), offset_idx)) = ctx.get_column_by_index(ci as u32) {
+                if sc.name() == "Name" {
+                    name_ci = Some(offset_idx);
+                    break;
+                }
+            }
+        }
+        if let Some(ci) = name_ci {
+            for row_id in ctx.sheet().get_row_ids() {
+                if let Ok(row) = ctx.sheet().get_row(row_id) {
+                    if let Ok(cell) = ctx.cell_by_offset(row, ci) {
+                        let v = cell.value_string();
+                        if !v.is_empty() {
+                            map.insert(row_id.to_string(), v);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    map
+}
+
+/// 读取链接表数据：优先读缓存（版本一致），否则读取游戏表并保存缓存
+async fn load_map_links(backend: &Backend, lang: Language, version: &str) -> MapLinks {
+    let cache_path = map_links_cache_path(version);
+    if let Ok(s) = std::fs::read_to_string(&cache_path) {
+        if let Ok(links) = serde_json::from_str::<MapLinks>(&s) {
+            log::debug!("地图链接表缓存命中: {}", cache_path.display());
+            return links;
+        }
+    }
+    log::info!("读取地图链接表（ContentType/ExVersion/ClassJobCategory）...");
+    let links = MapLinks {
+        content_type: read_name_map(backend, lang, "ContentType").await,
+        ex_version: read_name_map(backend, lang, "ExVersion").await,
+        class_job: read_name_map(backend, lang, "ClassJobCategory").await,
+    };
+    if let Some(parent) = cache_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(json) = serde_json::to_string(&links) {
+        let _ = std::fs::write(&cache_path, json);
+        log::info!("地图链接表已缓存: {}", cache_path.display());
+    }
+    links
+}
+
+/// 读取 ContentFinderConditionTransient 表的 行号→Description 映射（每次读取）
+async fn read_transient_map(backend: &Backend, lang: Language) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    if let Ok(sheet) = backend.excel().get_sheet("ContentFinderConditionTransient", lang).await {
+        let editable =
+            crate::config_file::load_schema_for_export(backend, "ContentFinderConditionTransient")
+                .await;
+        let schema = editable.as_ref().and_then(|e| e.get_schema());
+        let ctx = TableContext::new(
+            GlobalContext::new(
+                egui::Context::default(),
+                backend.clone(),
+                lang,
+                crate::utils::IconManager::new(),
+            ),
+            sheet,
+            schema,
+        );
+        let mut desc_ci: Option<u32> = None;
+        for ci in 0..ctx.column_count() {
+            if let Ok(((sc, _), offset_idx)) = ctx.get_column_by_index(ci as u32) {
+                if sc.name() == "Description" {
+                    desc_ci = Some(offset_idx);
+                    break;
+                }
+            }
+        }
+        if let Some(ci) = desc_ci {
+            for row_id in ctx.sheet().get_row_ids() {
+                if let Ok(row) = ctx.sheet().get_row(row_id) {
+                    if let Ok(cell) = ctx.cell_by_offset(row, ci) {
+                        let v = cell.value_string();
+                        if !v.is_empty() {
+                            map.insert(row_id.to_string(), v);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    map
+}
+
 /// 读取地图列表。
 /// 短编号来自 Map 表的 Id 列；名称来自 PlaceName 表（经 Map.PlaceName 链接）；
 /// 基本信息尽力从 ContentFinderCondition 表按 TerritoryType 关联补充。
 async fn load_map_rows(backend: &Backend, lang: Language) -> anyhow::Result<Vec<MapRow>> {
     let excel = backend.excel().clone();
+    // 链接表数据（ContentType/ExVersion/ClassJobCategory 缓存 + 描述每次读取）
+    let version = backend.game_version().unwrap_or("local").to_string();
+    let links = load_map_links(backend, lang, &version).await;
+    let transient_map = read_transient_map(backend, lang).await;
 
     // ── 读取 Map 表 ──
     let map_sheet = excel.get_sheet("Map", lang).await?;
@@ -626,7 +761,30 @@ async fn load_map_rows(backend: &Backend, lang: Language) -> anyhow::Result<Vec<
                         .cell_by_offset(row, off)
                         .map(|c| c.value_string())
                         .unwrap_or_default();
-                    info.push((label.to_string(), val));
+                    // 链接列显示引用表的数据（而非原始行号）
+                    let display = match *col_name {
+                        "ContentType" => links
+                            .content_type
+                            .get(&val)
+                            .cloned()
+                            .unwrap_or_else(|| val.clone()),
+                        "RequiredExVersion" => links
+                            .ex_version
+                            .get(&val)
+                            .cloned()
+                            .unwrap_or_else(|| val.clone()),
+                        "AcceptClassJobCategory" => links
+                            .class_job
+                            .get(&val)
+                            .cloned()
+                            .unwrap_or_else(|| val.clone()),
+                        "Transient" => transient_map
+                            .get(&val)
+                            .cloned()
+                            .unwrap_or_else(|| val.clone()),
+                        _ => val,
+                    };
+                    info.push((label.to_string(), display));
                 }
             }
             cfc_by_tt.entry(tt).or_insert((row_id, info));
