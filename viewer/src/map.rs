@@ -38,6 +38,8 @@ pub struct MapRow {
     pub display: String,
     /// 地图中文名（来自 PlaceName）
     pub name: String,
+    /// 二级地图名（来自 Map.PlaceNameSub，可能为空）
+    pub name_sub: String,
     /// ContentFinderCondition 行号（关联到则用，否则用 Map 行号）
     pub row_id: u32,
     /// 基本信息：(标签, 值) 列表
@@ -203,7 +205,9 @@ impl MapViewer {
         let mut event = None;
 
         // ── 左侧列表 ──
-        CollapsibleSidePanel::new("map_list", Side::Left).show(ui, |ui, is_open| {
+        CollapsibleSidePanel::new("map_list", Side::Left)
+            .default_width(300.0)
+            .show(ui, |ui, is_open| {
             if !is_open {
                 return;
             }
@@ -282,8 +286,10 @@ impl MapViewer {
                                 let row = &self.rows[idx];
                                 let label = if row.name.is_empty() {
                                     row.display.clone()
-                                } else {
+                                } else if row.name_sub.is_empty() {
                                     format!("{} - {}", row.display, row.name)
+                                } else {
+                                    format!("{} - {} - {}", row.display, row.name, row.name_sub)
                                 };
                                 let selected = self.selected == Some(idx);
                                 if ui.selectable_label(selected, &label).clicked() {
@@ -320,11 +326,17 @@ impl MapViewer {
         let name = row.name.clone();
         let maps = row.maps.clone();
 
-        // ── 最上方：地图中文名（标题文本，居中）──
+        // ── 最上方：地图中文名（标题文本，居中）；有二级名则第二行小字号显示 ──
         if !name.is_empty() {
             ui.add_space(6.0);
             ui.vertical_centered(|ui| {
                 ui.add(egui::Label::new(RichText::new(&name).size(24.0).strong()).wrap());
+                if !row.name_sub.is_empty() {
+                    ui.add(
+                        egui::Label::new(RichText::new(&row.name_sub).size(16.0))
+                            .wrap(),
+                    );
+                }
             });
             ui.add_space(6.0);
         }
@@ -346,8 +358,9 @@ impl MapViewer {
                 .show(ui, |ui| {
                     ui.vertical_centered(|ui| {
                     if !rest.is_empty() {
-                        // 每行 4 项
+                        // 每行 4 项；horizontal 收缩宽度以便整体居中
                         const PER_ROW: usize = 4;
+                        ui.horizontal(|ui| {
                         egui::Grid::new("map_info_grid")
                             .num_columns(PER_ROW * 2)
                             .spacing([12.0, 4.0])
@@ -365,6 +378,7 @@ impl MapViewer {
                                     ui.end_row();
                                 }
                             });
+                        });
                     }
                     // 描述：最后一行整行
                     if let Some(d) = desc {
@@ -386,18 +400,22 @@ impl MapViewer {
                     ui.horizontal(|ui| {
                         for sub in chunk {
                             ui.vertical(|ui| {
+                                ui.vertical_centered(|ui| {
                                 // 统一缩放为高 400px：大的等比缩小，小的等比放大
                                 match self.get_or_load_image(ui, &sub.code, backend) {
                                     MapImage::Loaded(tex) => {
                                         let (tw, th) = (tex.size()[0] as f32, tex.size()[1] as f32);
                                         let aspect = tw / th.max(1.0);
                                         let w = 400.0 * aspect;
-                                        // 用 SizedTexture::new 强制指定展示尺寸（大图等比缩小，小图等比放大）
+                                        // SizedTexture::new 强制尺寸 + fit_to_exact_size 双保险
                                         let st = egui::load::SizedTexture::new(
                                             tex.id(),
                                             Vec2::new(w, 400.0),
                                         );
-                                        ui.add(egui::Image::new(st));
+                                        ui.add(
+                                            egui::Image::new(st)
+                                                .fit_to_exact_size(Vec2::new(w, 400.0)),
+                                        );
                                     }
                                     MapImage::Loading => {
                                         ui.spinner();
@@ -411,11 +429,10 @@ impl MapViewer {
                                     }
                                 }
                                 // 下方：短编号 + 保存按钮（居中）
-                                ui.vertical_centered(|ui| {
-                                    ui.label(RichText::new(&sub.display).strong());
-                                    if ui.button("保存地图").clicked() {
-                                        event = Some(MapEvent::ExportOne(sub.code.clone()));
-                                    }
+                                ui.label(RichText::new(&sub.display).strong());
+                                if ui.button("保存地图").clicked() {
+                                    event = Some(MapEvent::ExportOne(sub.code.clone()));
+                                }
                                 });
                             });
                         }
@@ -651,12 +668,14 @@ async fn load_map_rows(backend: &Backend, lang: Language) -> anyhow::Result<Vec<
     let mut map_id_ci: Option<u32> = None;
     let mut map_tt_ci: Option<u32> = None;
     let mut map_place_ci: Option<u32> = None;
+    let mut map_place_sub_ci: Option<u32> = None;
     for ci in 0..map_ctx.column_count() {
         if let Ok(((sc, _), offset_idx)) = map_ctx.get_column_by_index(ci as u32) {
             match sc.name() {
                 "Id" => map_id_ci = Some(offset_idx),
                 "TerritoryType" => map_tt_ci = Some(offset_idx),
                 "PlaceName" => map_place_ci = Some(offset_idx),
+                "PlaceNameSub" => map_place_sub_ci = Some(offset_idx),
                 _ => {}
             }
         }
@@ -787,10 +806,10 @@ async fn load_map_rows(backend: &Backend, lang: Language) -> anyhow::Result<Vec<
                         | "ItemLevelSync" => {
                             if val == "0" { "无限制".to_string() } else { val }
                         }
-                        // 允许解限：true → √，false → ×
+                        // 允许解限：true/1 → √，false/0 → ×
                         "AllowUndersized" => match val.as_str() {
-                            "1" => "√".to_string(),
-                            "0" => "×".to_string(),
+                            "1" | "true" | "True" | "TRUE" => "√".to_string(),
+                            "0" | "false" | "False" | "FALSE" => "×".to_string(),
                             _ => val,
                         },
                         _ => val,
@@ -807,6 +826,7 @@ async fn load_map_rows(backend: &Backend, lang: Language) -> anyhow::Result<Vec<
         code: String,
         tt: String,
         place: String,
+        place_sub: String,
         row_id: u32,
     }
     let mut raws: Vec<RawMap> = Vec::new();
@@ -828,10 +848,18 @@ async fn load_map_rows(backend: &Backend, lang: Language) -> anyhow::Result<Vec<
             .map(|c| c.value_string())
             .and_then(|id| place_names.get(&id).cloned())
             .unwrap_or_default();
+        // 二级地图名（PlaceNameSub 链接 → PlaceName 表文本；0/空视为无）
+        let place_sub = map_place_sub_ci
+            .and_then(|off| map_ctx.cell_by_offset(row, off).ok())
+            .map(|c| c.value_string())
+            .filter(|id| !id.is_empty() && id != "0")
+            .and_then(|id| place_names.get(&id).cloned())
+            .unwrap_or_default();
         raws.push(RawMap {
             code,
             tt,
             place,
+            place_sub,
             row_id,
         });
     }
@@ -846,11 +874,15 @@ async fn load_map_rows(backend: &Backend, lang: Language) -> anyhow::Result<Vec<
         .into_iter()
         .map(|(base, mut raws)| {
             raws.sort_by(|a, b| a.code.cmp(&b.code));
-            let first = &raws[0];
-            let name = first.place.clone();
-            let (cfc_row_id, mut info) = match cfc_by_tt.get(&first.tt) {
+            // 先提取第一张分图的名称数据（避免借用冲突）
+            let first_place = raws[0].place.clone();
+            let first_sub = raws[0].place_sub.clone();
+            let first_tt = raws[0].tt.clone();
+            let first_row_id = raws[0].row_id;
+            let name = first_place;
+            let (cfc_row_id, mut info) = match cfc_by_tt.get(&first_tt) {
                 Some(v) => v.clone(),
-                None => (first.row_id, vec![("编号".to_string(), first.row_id.to_string())]),
+                None => (first_row_id, vec![("编号".to_string(), first_row_id.to_string())]),
             };
             // 统一：编号 之后是 短编号
             info.insert(1, ("短编号".to_string(), display_code(&base)));
@@ -865,6 +897,7 @@ async fn load_map_rows(backend: &Backend, lang: Language) -> anyhow::Result<Vec<
                 display: display_code(&base),
                 base_code: base,
                 name,
+                name_sub: first_sub,
                 row_id: cfc_row_id,
                 info,
                 maps,

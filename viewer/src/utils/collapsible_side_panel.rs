@@ -24,6 +24,7 @@ pub struct CollapsibleSidePanel {
     id: Id,
     side: Side,
     collapsed_width: Option<f32>,
+    default_width: Option<f32>,
 }
 
 impl CollapsibleSidePanel {
@@ -32,11 +33,18 @@ impl CollapsibleSidePanel {
             id: id.into(),
             side,
             collapsed_width: None,
+            default_width: None,
         }
     }
 
     pub fn collapsed_width(mut self, width: f32) -> Self {
         self.collapsed_width = Some(width);
+        self
+    }
+
+    /// 展开时的默认宽度（面板仍可拖动调整）
+    pub fn default_width(mut self, width: f32) -> Self {
+        self.default_width = Some(width);
         self
     }
 
@@ -56,11 +64,16 @@ impl CollapsibleSidePanel {
 
         if openness != 0.0 || self.collapsed_width.is_some() {
             let mut is_expanded = is_expanded;
+            let expanded_panel = self.side.panel(self.id);
+            let expanded_panel = match self.default_width {
+                Some(w) => expanded_panel.default_size(w),
+                None => expanded_panel,
+            };
             Some(Panel::show_switched(
                 ui,
                 &mut is_expanded,
                 collapsed_panel,
-                self.side.panel(self.id),
+                expanded_panel,
                 |ui, expanded| add_contents(ui, expanded),
             ))
         } else {
