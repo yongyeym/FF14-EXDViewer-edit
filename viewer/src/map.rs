@@ -584,8 +584,25 @@ async fn load_map_links(backend: &Backend, lang: Language, version: &str) -> Map
     if let Ok(json) = serde_json::to_string(&links) {
         let _ = std::fs::write(&cache_path, json);
         log::info!("地图链接表已缓存: {}", cache_path.display());
+        // 旧版本 map_links 直接删除，只保留最新版（数据随版本更新，无需归档）
+        cleanup_map_links(version);
     }
     links
+}
+
+/// 删除 config 目录下除当前版本外的全部 map_links_*.json（旧版本直接删除，不归档）
+fn cleanup_map_links(current_version: &str) {
+    let safe_cur = current_version.replace('.', "_");
+    let target = format!("map_links_{safe_cur}.json");
+    if let Ok(entries) = std::fs::read_dir(std::path::PathBuf::from("config")) {
+        for e in entries.flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            if name.starts_with("map_links_") && name.ends_with(".json") && name != target {
+                let _ = std::fs::remove_file(e.path());
+                log::debug!("已删除旧版本地图链接缓存: {name}");
+            }
+        }
+    }
 }
 
 /// 读取地图列表。

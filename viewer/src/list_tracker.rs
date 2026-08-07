@@ -105,6 +105,12 @@ fn archive_file(path: &PathBuf, kind: &str) {
 fn list_old_files(prefix: &str, current_version: &str) -> Vec<(String, PathBuf)> {
     let dir = config_dir();
     let safe_cur = current_version.replace('.', "_");
+    // prefix 需带尾随下划线（文件名形如 sheet_list_2026_07_16.json）
+    let file_prefix = if prefix.ends_with('_') {
+        prefix.to_string()
+    } else {
+        format!("{prefix}_")
+    };
     let Ok(entries) = std::fs::read_dir(&dir) else {
         return Vec::new();
     };
@@ -113,9 +119,9 @@ fn list_old_files(prefix: &str, current_version: &str) -> Vec<(String, PathBuf)>
         .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
         .filter_map(|e| {
             let name = e.file_name().to_string_lossy().to_string();
-            if name.starts_with(prefix) {
+            if name.starts_with(&file_prefix) {
                 let ver = name
-                    .strip_prefix(prefix)
+                    .strip_prefix(&file_prefix)
                     .and_then(|s| s.strip_suffix(".json"))
                     .unwrap_or("");
                 Some((ver.to_string(), e.path()))
