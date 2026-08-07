@@ -166,16 +166,12 @@ impl MapViewer {
         };
         let cur_path = std::path::PathBuf::from("config").join(format!("map_list_{safe_ver}.json"));
         crate::list_tracker::save_list(&cur_path, &list);
-        if let Some(prev_path) = Self::find_prev_list(&safe_ver) {
-            if let Some(prev) = crate::list_tracker::load_list(&prev_path) {
-                if let crate::list_tracker::ComparisonResult::NewItems(items) =
-                    crate::list_tracker::compare_lists(&version, &list, Some(&prev))
-                {
-                    self.new_codes = items.into_iter().collect();
-                }
-            }
+        // 对比并归档：从最近旧版本逐个往前对比找有变动的版本，其余旧 json 移到 config/bak/map_list/
+        if let crate::list_tracker::ComparisonResult::NewItems(items) =
+            crate::list_tracker::compare_and_archive(&version, &list, "map_list")
+        {
+            self.new_codes = items.into_iter().collect();
         }
-        crate::list_tracker::cleanup_lists("map_list_", &version);
     }
 
     fn find_prev_list(current_safe: &str) -> Option<std::path::PathBuf> {

@@ -2223,13 +2223,9 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
         };
         crate::list_tracker::save_list(&cur_path, &sheet_list);
 
-        // Find previous version's list
-        let prev_path = Self::find_prev_list("sheet_list_", &safe_ver);
-        let prev_list = prev_path.as_ref().and_then(|p| crate::list_tracker::load_list(p));
-
-        log::debug!("Sheet list: {} items, prev={:?}", sheet_names.len(), prev_path);
-        self.sheet_list_state = match crate::list_tracker::compare_lists(
-            &version, &sheet_list, prev_list.as_ref(),
+        log::debug!("Sheet list: {} items", sheet_names.len());
+        self.sheet_list_state = match crate::list_tracker::compare_and_archive(
+            &version, &sheet_list, "sheet_list",
         ) {
             crate::list_tracker::ComparisonResult::NoPrevious => {
                 "no_prev".to_string()
@@ -2249,7 +2245,7 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
             }
             crate::list_tracker::ComparisonResult::Error(e) => format!("error:{e}"),
         };
-        crate::list_tracker::cleanup_lists("sheet_list_", &version);
+
 
         // ── Music list (async) ───────────────────────────────────
         let excel = backend.excel().clone();
@@ -2278,10 +2274,8 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                             let cur_path = std::path::PathBuf::from("config")
                                 .join(format!("music_list_{safe_ver}.json"));
                             if let Some(list) = crate::list_tracker::load_list(&cur_path) {
-                                let prev_path = Self::find_prev_list("music_list_", &safe_ver);
-                                let prev = prev_path.as_ref().and_then(crate::list_tracker::load_list);
-                                self.music_list_state = match crate::list_tracker::compare_lists(
-                                    version, &list, prev.as_ref(),
+                                self.music_list_state = match crate::list_tracker::compare_and_archive(
+                                    version, &list, "music_list",
                                 ) {
                                     crate::list_tracker::ComparisonResult::NoPrevious => "no_prev".into(),
                                     crate::list_tracker::ComparisonResult::SameVersion => "no_changes".into(),
@@ -2293,7 +2287,6 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                                     }
                                     crate::list_tracker::ComparisonResult::Error(e) => format!("error:{e}"),
                                 };
-                                crate::list_tracker::cleanup_lists("music_list_", version);
                             }
                         }
                     }

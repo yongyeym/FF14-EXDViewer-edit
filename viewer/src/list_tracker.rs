@@ -81,6 +81,103 @@ pub fn cleanup_lists(prefix: &str, current_version: &str) {
     }
 }
 
+/// 归档目录：exe目录/config/bak/{kind}/
+fn bak_dir(kind: &str) -> PathBuf {
+    config_dir().join("bak").join(kind)
+}
+
+/// 将列表文件移动到存档目录 config/bak/{kind}/{文件名}
+fn archive_file(path: &PathBuf, kind: &str) {
+    let bak = bak_dir(kind);
+    let _ = std::fs::create_dir_all(&bak);
+    let fname = path.file_name().unwrap_or_default();
+    let dest = bak.join(fname);
+    if dest.exists() {
+        let _ = std::fs::remove_file(&dest);
+    }
+    if std::fs::rename(path, &dest).is_err() {
+        let _ = std::fs::copy(path, &dest);
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+/// 列出 config 目录下某列表类型（prefix）的全部版本 json（除当前版本），按版本从新到旧排序。
+fn list_old_files(prefix: &str, current_version: &str) -> Vec<(String, PathBuf)> {
+    let dir = config_dir();
+    let safe_cur = current_version.replace('.', "_");
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut list_files: Vec<(String, PathBuf)> = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            if name.starts_with(prefix) {
+                let ver = name
+                    .strip_prefix(prefix)
+                    .and_then(|s| s.strip_suffix(".json"))
+                    .unwrap_or("");
+                Some((ver.to_string(), e.path()))
+            } else {
+                None
+            }
+        })
+        .filter(|(ver, _)| *ver != safe_cur)
+        .collect();
+    list_files.sort_by(|a, b| b.0.cmp(&a.0));
+    list_files
+}
+
+/// 对比当前版本与旧版本列表并归档。
+///
+/// 逻辑：从最近的旧版本开始，逐个对比（当前 vs 该版本）。找到第一个有变动的版本后，
+/// 新增项即当前相对该版本的新增；随后把“当前版本 + 该有变动版本”之外的旧 json
+/// 移动到 `config/bak/{kind}/` 存档目录（kind 为 sheet_list / music_list / map_list）。
+/// 若所有旧版本都无变动（小型修复版本数据未变），则保留当前 + 最近一个旧版本，其余归档。
+pub fn compare_and_archive(
+    current_version: &str,
+    current_list: &VersionedList,
+    kind: &str,
+) -> ComparisonResult {
+    let old_files = list_old_files(kind, current_version);
+    if old_files.is_empty() {
+        return ComparisonResult::NoPrevious;
+    }
+
+    // 从新到旧逐个对比，找第一个有变动的版本
+    for (ver, path) in &old_files {
+        if let Some(prev_list) = load_list(path) {
+            match compare_lists(current_version, current_list, Some(&prev_list)) {
+                ComparisonResult::NewItems(items) => {
+                    // 归档：保留当前版本 + 该有变动版本，其余旧 json 移到 bak
+                    for (v, p) in &old_files {
+                        if v != ver {
+                            archive_file(p, kind);
+                        }
+                    }
+                    log::debug!(
+                        "{}: 对比有变动版本 {ver} 发现 {} 项新增，其余旧版本已归档到 config/bak/{kind}/",
+                        kind,
+                        items.len()
+                    );
+                    return ComparisonResult::NewItems(items);
+                }
+                _ => continue, // 无变动，继续对比更早版本
+            }
+        }
+    }
+
+    // 所有旧版本均无变动：保留当前 + 最近一个旧版本，其余归档
+    for (i, (_, p)) in old_files.iter().enumerate() {
+        if i > 0 {
+            archive_file(p, kind);
+        }
+    }
+    log::debug!("{kind}: 所有旧版本均无变动，仅保留最近一个旧版本，其余已归档到 config/bak/{kind}/");
+    ComparisonResult::SameVersion
+}
+
 /// Compute the list of items that are present in `current` but not in `previous`.
 pub fn compute_new_items(current: &[String], previous: &[String]) -> Vec<String> {
     let prev_set: HashSet<&str> = previous.iter().map(String::as_str).collect();
