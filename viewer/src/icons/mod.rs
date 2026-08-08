@@ -359,7 +359,7 @@ impl IconBrowser {
                     select(
                         ui,
                         Category::All,
-                        format!("All icons ({})", thousands(self.all.len())),
+                        format!("全部图标（{}）", thousands(self.all.len())),
                     );
                 }
 
@@ -393,13 +393,13 @@ impl IconBrowser {
                             select(
                                 ui,
                                 Category::Localized,
-                                format!("Language icons ({})", thousands(localized)),
+                                format!("本地化专属图标（{}）", thousands(localized)),
                             );
                             select(
                                 ui,
                                 Category::Unreferenced,
                                 format!(
-                                    "Other icons ({})",
+                                    "其他图标（{}）",
                                     thousands(self.all.len().saturating_sub(refs.referenced()))
                                 ),
                             );
@@ -907,11 +907,11 @@ fn pixel_size(ctx: &egui::Context, source: &egui::ImageSource<'static>) -> Optio
 /// Draw an icon centered in `rect` at its own aspect. `Image::paint_at` fills whatever rect it is
 /// given, which stretches everything that is not square.
 fn fit_into(ui: &egui::Ui, source: egui::ImageSource<'static>, rect: egui::Rect) {
-    let image = egui::Image::new(source).maintain_aspect_ratio(true);
-    let size = image
-        .load_and_calc_size(ui, rect.size())
-        .unwrap_or(rect.size());
-    image.paint_at(ui, egui::Rect::from_center_size(rect.center(), size));
+    // 强制图片尺寸等于格子（40×40 等），大图等比缩小、小图等比放大，不再按原始分辨率展示
+    let image = egui::Image::new(source)
+        .maintain_aspect_ratio(true)
+        .fit_to_exact_size(rect.size());
+    image.paint_at(ui, rect);
 }
 
 fn checkerboard(ui: &egui::Ui, rect: egui::Rect) {

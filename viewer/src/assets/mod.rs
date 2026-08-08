@@ -100,7 +100,7 @@ fn build_index(paths: &[u8], presence: &[u8]) -> Result<Loaded, String> {
     // reveal the wrong files rather than fail.
     if paths.list_id() != presence.list_id() {
         return Err(format!(
-            "This version's file map was built against path list {:016x}, but the list is {:016x}.",
+            "此版本的文件映射基于路径列表 {:016x} 构建，但当前列表为 {:016x}。",
             presence.list_id(),
             paths.list_id(),
         ));
@@ -538,12 +538,12 @@ impl Loaded {
         let offset = match self.paths.name_offset(dir) {
             Ok(offset) => offset,
             Err(e) => {
-                log::error!("No offset for directory {dir}: {e}");
+                log::error!("目录 {dir} 无偏移: {e}");
                 return Vec::new();
             }
         };
         let names = self.paths.names(dir).unwrap_or_else(|e| {
-            log::error!("Failed to decode directory {dir}: {e}");
+            log::error!("无法解码目录 {dir}: {e}");
             Vec::new()
         });
         // The list is global, so anything this version does not ship is dropped here.
@@ -585,9 +585,9 @@ impl SearchMode {
 
     fn label(self) -> &'static str {
         match self {
-            Self::Fuzzy => "Fuzzy",
-            Self::Strict => "Contains",
-            Self::Regex => "Regex",
+            Self::Fuzzy => "模糊",
+            Self::Strict => "包含",
+            Self::Regex => "正则",
         }
     }
 }
@@ -969,7 +969,7 @@ impl AssetBrowser {
 
     pub fn open_palette(&mut self) {
         self.palette = Some(Palette::new(
-            "Find Asset…",
+            "查找资源…",
             "搜索路径",
             self.search.clone(),
         ));
@@ -1966,60 +1966,60 @@ impl Kind {
 /// Every extension the path list carries, with what it holds. Also the menu the search box offers,
 /// so the order is the order they are listed in.
 const EXTENSIONS: &[(&str, &str, Viewer)] = &[
-    ("exd", "Excel sheet data", Viewer::Raw),
-    ("exh", "Excel sheet header", Viewer::Raw),
-    ("exl", "Excel sheet list", Viewer::Raw),
-    ("tex", "Texture", Viewer::Texture),
-    ("atex", "Animated texture", Viewer::Texture),
-    ("png", "PNG image", Viewer::Image),
-    ("mdl", "Model", Viewer::Model),
-    ("mtrl", "Material", Viewer::Material),
-    ("shpk", "Shader package", Viewer::Shpk),
-    ("shcd", "Shader code", Viewer::Shcd),
-    ("scd", "Sound container", Viewer::Raw),
-    ("ggd", "Grass grid data", Viewer::Ggd),
-    ("gzd", "Grass zone data", Viewer::Gzd),
-    ("pcb", "Player collision binary", Viewer::Pcb),
-    ("sklb", "Skeleton", Viewer::Raw),
-    ("skp", "Skeleton parameters", Viewer::Skp),
-    ("pap", "Animation", Viewer::Raw),
-    ("tmb", "Animation timeline", Viewer::Raw),
-    ("phyb", "Physics bones", Viewer::Raw),
-    ("eid", "Bone bindings", Viewer::Eid),
-    ("atch", "Attachment points", Viewer::Atch),
-    ("avfx", "Animated VFX", Viewer::Avfx),
-    ("uld", "UI layout", Viewer::Uld),
-    ("lgb", "Layer group, a zone's placed objects", Viewer::Lgb),
+    ("exd", "Excel 表数据", Viewer::Raw),
+    ("exh", "Excel 表头", Viewer::Raw),
+    ("exl", "Excel 表列表", Viewer::Raw),
+    ("tex", "纹理", Viewer::Texture),
+    ("atex", "动画纹理", Viewer::Texture),
+    ("png", "PNG 图片", Viewer::Image),
+    ("mdl", "模型", Viewer::Model),
+    ("mtrl", "材质", Viewer::Material),
+    ("shpk", "着色器包", Viewer::Shpk),
+    ("shcd", "着色器代码", Viewer::Shcd),
+    ("scd", "音频容器", Viewer::Raw),
+    ("ggd", "草地网格数据", Viewer::Ggd),
+    ("gzd", "草地区域数据", Viewer::Gzd),
+    ("pcb", "玩家碰撞二进制", Viewer::Pcb),
+    ("sklb", "骨骼", Viewer::Raw),
+    ("skp", "骨骼参数", Viewer::Skp),
+    ("pap", "动画", Viewer::Raw),
+    ("tmb", "动画时间线", Viewer::Raw),
+    ("phyb", "物理骨骼", Viewer::Raw),
+    ("eid", "骨骼绑定", Viewer::Eid),
+    ("atch", "附加点", Viewer::Atch),
+    ("avfx", "动画特效", Viewer::Avfx),
+    ("uld", "UI 布局", Viewer::Uld),
+    ("lgb", "图层组：区域放置的对象", Viewer::Lgb),
     (
         "sgb",
-        "Shared group, a reusable set of objects",
+        "共享组：可复用的对象集",
         Viewer::Sgb,
     ),
-    ("lvb", "Level variable binary", Viewer::Lvb),
-    ("svb", "Sky visibility binary", Viewer::Svb),
-    ("uwb", "Underwater settings", Viewer::Uwb),
-    ("envb", "Environment binary", Viewer::Envb),
-    ("lcb", "Light culling binary", Viewer::Lcb),
-    ("obsb", "Object behavior set binary", Viewer::Obsb),
-    ("essb", "Environment sound binary", Viewer::Essb),
-    ("luab", "Lua bytecode", Viewer::Luab),
-    ("cutb", "Cutscene", Viewer::Raw),
-    ("imc", "Image change data", Viewer::Imc),
-    ("eqdp", "Equipment deformer parameters", Viewer::Raw),
-    ("eqp", "Equipment parameters", Viewer::Raw),
-    ("gmp", "Gimmick parameters", Viewer::Raw),
-    ("est", "Equipment skeleton template", Viewer::Est),
-    ("evp", "Equipment VFX parameters", Viewer::Raw),
-    ("pbd", "Bone deformers", Viewer::Pbd),
-    ("amb", "Ambient light", Viewer::Amb),
-    ("tera", "Terrain", Viewer::Tera),
-    ("hwc", "Handware cursor", Viewer::Raw),
-    ("fdt", "Font data table", Viewer::Font),
-    ("gfd", "Graphics font data", Viewer::Icons),
-    ("stm", "Stain map", Viewer::Stm),
-    ("cmp", "Character make parameters", Viewer::Cmp),
-    ("plt", "PAP load table", Viewer::Raw),
-    ("spm", "Shader parameter map", Viewer::Spm),
+    ("lvb", "关卡变量二进制", Viewer::Lvb),
+    ("svb", "天空可见性二进制", Viewer::Svb),
+    ("uwb", "水下设置", Viewer::Uwb),
+    ("envb", "环境二进制", Viewer::Envb),
+    ("lcb", "光照剔除二进制", Viewer::Lcb),
+    ("obsb", "对象行为集二进制", Viewer::Obsb),
+    ("essb", "环境音效二进制", Viewer::Essb),
+    ("luab", "Lua 字节码", Viewer::Luab),
+    ("cutb", "过场动画", Viewer::Raw),
+    ("imc", "换装数据", Viewer::Imc),
+    ("eqdp", "装备变形器参数", Viewer::Raw),
+    ("eqp", "装备参数", Viewer::Raw),
+    ("gmp", "机关参数", Viewer::Raw),
+    ("est", "装备骨骼模板", Viewer::Est),
+    ("evp", "装备特效参数", Viewer::Raw),
+    ("pbd", "骨骼变形器", Viewer::Pbd),
+    ("amb", "环境光", Viewer::Amb),
+    ("tera", "地形", Viewer::Tera),
+    ("hwc", "硬件光标", Viewer::Raw),
+    ("fdt", "字体数据表", Viewer::Font),
+    ("gfd", "图形字体数据", Viewer::Icons),
+    ("stm", "染色贴图", Viewer::Stm),
+    ("cmp", "角色捏脸参数", Viewer::Cmp),
+    ("plt", "PAP 加载表", Viewer::Raw),
+    ("spm", "着色器参数映射", Viewer::Spm),
 ];
 
 /// `exd/item_0_en.exd` -> `Item`, `exd/content/foo_0_en.exd` -> `content/Foo`.
