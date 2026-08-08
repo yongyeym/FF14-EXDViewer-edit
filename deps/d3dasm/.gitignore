@@ -1,0 +1,15 @@
+# Build
+/target
+
+# Proprietary shader data
+/shaders
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~

@@ -221,6 +221,9 @@ pub const LOGGER_SHOWN: DKey<bool> = DKey::new("logger-shown", false);
 pub const SORTED_BY_OFFSET: DKey<bool> = DKey::new("sorted-by-offset", false);
 pub const SOLID_SCROLLBAR: DKey<bool> = DKey::new("solid-scrollbar", false);
 pub const ALWAYS_HIRES: DKey<bool> = DKey::new("always-hires", true);
+
+/// AVFX 播放帧率（资源查看器用）。
+pub const AVFX_FRAME_RATE: DKey<f32> = DKey::new("avfx-frame-rate", 60.0);
 pub const DISPLAY_FIELD_SHOWN: DKey<bool> = DKey::new("display-field-shown", true);
 pub const EVALUATE_STRINGS: DKey<bool> = DKey::new("evaluate-strings", false);
 pub const TEXT_WRAP_WIDTH: DKey<Option<NonZero<u16>>> =
@@ -396,6 +399,11 @@ pub enum SchemaLocation {
     Worker(String),
     Github(GithubSchemaLocation),
     Web(String),
+}
+
+/// 当前 API 服务地址（图标/资源索引用）。修改版未提供 API 配置，使用默认地址。
+pub fn api_base(_ctx: &egui::Context) -> String {
+    crate::DEFAULT_API_URL.trim_end_matches('/').to_string()
 }
 
 #[derive(Clone, Serialize, Deserialize)]

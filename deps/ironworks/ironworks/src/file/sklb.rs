@@ -2,13 +2,15 @@
 
 use std::io::{Read, Seek, SeekFrom};
 
-use binrw::helpers::{count, until_eof};
+use binrw::helpers::until_eof;
 use binrw::{BinRead, BinResult, Endian, binread};
 use getset::{CopyGetters, Getters};
 
 use crate::{FileStream, error::Result};
 
-use super::file::File;
+use super::{animation, file::File};
+
+pub use animation::AnimationLayer;
 
 /// Skeleton data and related mappings.
 #[binread]
@@ -25,21 +27,11 @@ pub struct SkeletonBinary {
 	header: Header,
 
 	// Animation Layers.
+	///
 	#[br(
 		seek_before = SeekFrom::Start(header.layer_offset().into()),
-		temp,
-		assert(&alph_magic == b"hpla")
+		parse_with = animation::layers,
 	)]
-	alph_magic: [u8; 4],
-
-	#[br(temp)]
-	layer_count: u16,
-
-	///
-	#[br(args {
-		count: layer_count.into(),
-		inner: (header.layer_offset().into(),)
-	})]
 	#[get = "pub"]
 	animation_layers: Vec<AnimationLayer>,
 
@@ -71,9 +63,10 @@ impl SkeletonBinary {
 
 	///
 	pub fn connect_bones(&self) -> Vec<i16> {
-		match &self.header {
-			Header::V1(header) => header.connect_bones.to_vec(),
-			Header::V2(header) => vec![header.connect_bone_index],
+		match (&self.header, self.version) {
+			(Header::V1(header), _) => header.connect_bones.to_vec(),
+			(Header::V2(header), Version::V1301) => header.connect_bones.to_vec(),
+			(Header::V2(header), _) => vec![header.connect_bone_index],
 		}
 	}
 
@@ -109,6 +102,9 @@ pub enum Version {
 
 	#[br(magic = b"0031")]
 	V1300,
+
+	#[br(magic = b"1031")]
+	V1301,
 }
 
 #[derive(Debug)]
@@ -145,7 +141,7 @@ impl BinRead for Header {
 			Version::V1100 | Version::V1110 | Version::V1200 => {
 				Ok(Self::V1(HeaderV1::read(reader)?))
 			}
-			Version::V1300 => Ok(Self::V2(HeaderV2::read(reader)?)),
+			Version::V1300 | Version::V1301 => Ok(Self::V2(HeaderV2::read(reader)?)),
 		}
 	}
 }
@@ -172,44 +168,49 @@ struct HeaderV2 {
 	#[br(pad_before = 2)]
 	character_id: u32,
 	mapper_character_id: [u32; 4],
+	connect_bones: [i16; 4],
 }
 
-///
-#[derive(Debug, Getters, CopyGetters)]
-pub struct AnimationLayer {
-	///
-	#[get_copy = "pub"]
-	layer: u32,
+#[cfg(test)]
+mod test {
+	use std::io::Cursor;
 
-	///
-	#[get = "pub"]
-	bone_indices: Vec<i16>,
-}
+	use crate::file::File;
 
-impl BinRead for AnimationLayer {
-	type Args<'a> = (u64,);
+	use super::SkeletonBinary;
 
-	fn read_options<R: Read + Seek>(
-		reader: &mut R,
-		options: Endian,
-		(base_offset,): Self::Args<'_>,
-	) -> BinResult<Self> {
-		let offset = u16::read_le(reader)?;
-		let position = reader.stream_position()?;
+	/// A new-style skeleton of the given version, carrying no animation layers and a one-byte
+	/// skeleton block.
+	fn skeleton(version: &[u8; 4], connect_bone_index: i16, connect_bones: [i16; 4]) -> Vec<u8> {
+		let mut bytes = Vec::new();
+		bytes.extend(b"blks");
+		bytes.extend(version);
+		bytes.extend(48u32.to_le_bytes());
+		bytes.extend(54u32.to_le_bytes());
+		bytes.extend(connect_bone_index.to_le_bytes());
+		bytes.extend([0; 2]);
+		bytes.extend(1301u32.to_le_bytes());
+		bytes.extend([0xFF; 16]);
+		bytes.extend(connect_bones.iter().flat_map(|bone| bone.to_le_bytes()));
+		bytes.extend(b"hpla");
+		bytes.extend(0u16.to_le_bytes());
+		bytes.push(0);
+		bytes
+	}
 
-		reader.seek(SeekFrom::Start(base_offset + u64::from(offset)))?;
+	#[test]
+	fn reads_a_bone_list_from_the_newest_header() {
+		let bytes = skeleton(b"1031", 0, [11, 59, 60, -1]);
+		let file = SkeletonBinary::read(Cursor::new(bytes)).unwrap();
+		assert_eq!(file.character_id(), 1301);
+		assert_eq!(file.connect_bones(), [11, 59, 60, -1]);
+	}
 
-		let layer = u32::read_le(reader)?;
-		let bone_count = u16::read_le(reader)?;
-		let bone_indices = count(bone_count.into())(reader, options, ())?;
-
-		let result = Self {
-			layer,
-			bone_indices,
-		};
-
-		reader.seek(SeekFrom::Start(position))?;
-
-		Ok(result)
+	/// The version before it names one bone, and leaves the list's bytes empty.
+	#[test]
+	fn reads_a_single_bone_from_the_prior_header() {
+		let bytes = skeleton(b"0031", 46, [0; 4]);
+		let file = SkeletonBinary::read(Cursor::new(bytes)).unwrap();
+		assert_eq!(file.connect_bones(), [46]);
 	}
 }

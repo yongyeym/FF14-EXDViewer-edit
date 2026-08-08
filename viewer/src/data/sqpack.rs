@@ -1,6 +1,7 @@
 use crate::utils::tex_loader;
 
-use super::{FileProvider, get_icon_path};
+use super::{FileProvider, build_local_presence, get_icon_path, index_hash, list_url, stream, with_list_id};
+use crate::utils::fetch_url;
 use async_trait::async_trait;
 use either::Either;
 use image::RgbaImage;
@@ -8,22 +9,29 @@ use ironworks::{
     Ironworks,
     sqpack::{Install, SqPack},
 };
-use std::{path::PathBuf, str::FromStr};
+use std::{path::PathBuf, rc::Rc, str::FromStr};
 use url::Url;
 
-pub struct SqpackFileProvider(Ironworks<SqPack<Install>>);
+pub struct SqpackFileProvider {
+    ironworks: Ironworks<Rc<SqPack<Install>>>,
+    /// The same resource the `Ironworks` holds. Hash lookups are a SqPack concept, so they need the
+    /// concrete type; sharing it keeps one index cache rather than two.
+    sqpack: Rc<SqPack<Install>>,
+}
 
 impl SqpackFileProvider {
     pub fn new(install_location: &str) -> Self {
         let resource = Install::at_sqpack(PathBuf::from_str(install_location).unwrap());
-        let resource = ironworks::sqpack::SqPack::new(resource);
-        let ironworks = Ironworks::new().with_resource(resource);
-        Self(ironworks)
+        let sqpack = Rc::new(SqPack::new(resource));
+        Self {
+            ironworks: Ironworks::new().with_resource(sqpack.clone()),
+            sqpack,
+        }
     }
 
     pub fn game_version(&self) -> Option<String> {
         // Use a valid two-segment path (category/repository) to extract repository 0 (ffxiv)
-        let version = self.0.version("exd/ffxiv").ok().map(|v| v.trim().to_string());
+        let version = self.ironworks.version("exd/ffxiv").ok().map(|v| v.trim().to_string());
         if let Some(ref v) = version {
             log::info!("检测到游戏版本: {v}");
         } else {
@@ -36,25 +44,51 @@ impl SqpackFileProvider {
 #[async_trait(?Send)]
 impl FileProvider for SqpackFileProvider {
     async fn read(&self, path: &str) -> anyhow::Result<Vec<u8>> {
-        Ok(self.0.file::<Vec<u8>>(path)?)
+        Ok(self.ironworks.file::<Vec<u8>>(path)?)
+    }
+
+    async fn read_stream(&self, path: &str) -> anyhow::Result<(Option<String>, Vec<u8>)> {
+        let (kind, bytes) = stream(self.sqpack.file(path)?)?;
+        Ok((Some(kind), bytes))
+    }
+
+    async fn read_stream_by_hash(
+        &self,
+        repository: u8,
+        category: u8,
+        hash: u64,
+        split: bool,
+    ) -> anyhow::Result<(Option<String>, Vec<u8>)> {
+        let (kind, bytes) = stream(self.sqpack.file_by_hash(
+            repository,
+            category,
+            index_hash(hash, split),
+        )?)?;
+        Ok((Some(kind), bytes))
     }
 
     async fn get_icon(&self, icon_id: u32, hires: bool) -> anyhow::Result<Either<Url, RgbaImage>> {
         let path = get_icon_path(icon_id, hires);
-        let data = tex_loader::read(&self.0, &path)?;
+        let data = tex_loader::read(&self.ironworks, &path)?;
         Ok(Either::Right(data.into_rgba8()))
     }
 
     async fn exists_many(&self, paths: &[String]) -> anyhow::Result<Vec<bool>> {
         let mut result = Vec::with_capacity(paths.len());
         for path in paths {
-            result.push(self.0.exists(path)?);
+            result.push(self.ironworks.exists(path)?);
         }
         Ok(result)
     }
 
     async fn read_tex(&self, path: &str) -> anyhow::Result<RgbaImage> {
-        let data = tex_loader::read(&self.0, path)?;
+        let data = tex_loader::read(&self.ironworks, path)?;
         Ok(data.into_rgba8())
+    }
+
+    async fn path_index(&self, api_base: &str) -> anyhow::Result<(Vec<u8>, Vec<u8>)> {
+        let paths = with_list_id(api_base, |id| fetch_url(list_url(api_base, id))).await?;
+        let presence = build_local_presence(&self.sqpack, &paths)?;
+        Ok((paths, presence))
     }
 }

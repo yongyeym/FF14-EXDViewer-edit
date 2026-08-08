@@ -18,6 +18,7 @@ use matchit::Params;
 use zip::{ZipWriter, write::SimpleFileOptions};
 
 use crate::{
+    assets, icons,
     about,
     backend::Backend,
     data::FileProviderExt,
@@ -216,6 +217,8 @@ pub struct App {
     about_open: bool,
     music: music::MusicPlayer,
     map: crate::map::MapViewer,
+    icons: icons::IconBrowser,
+    assets: assets::AssetBrowser,
     last_system_theme: Option<egui::Theme>,
     /// `None` = Latin only
     loaded_cjk: Option<CjkFont>,
@@ -264,6 +267,10 @@ fn create_router(ctx: egui::Context) -> Result<Router<App>> {
     builder.add_route("/sheet/{*name}", App::on_named_sheet, App::draw_named_sheet)?;
     builder.add_route("/music", App::on_music, App::draw_music)?;
     builder.add_route("/maps", App::on_maps, App::draw_maps)?;
+    builder.add_route("/icons", App::on_icons, App::draw_icons)?;
+    builder.add_route("/icons/{id}", App::on_icon, App::draw_icons)?;
+    builder.add_route("/assets", App::on_assets, App::draw_assets)?;
+    builder.add_route("/assets/{*path}", App::on_asset_path, App::draw_assets)?;
     builder.add_route("/music/{id}", App::on_music_track, App::draw_music)?;
     builder.add_route(
         CALLBACK_PATH,
@@ -295,6 +302,22 @@ impl App {
             .path()
             .starts_with("/maps");
 
+        let on_icons = self
+            .router
+            .get()
+            .unwrap()
+            .current_path()
+            .path()
+            .starts_with("/icons");
+
+        let on_assets = self
+            .router
+            .get()
+            .unwrap()
+            .current_path()
+            .path()
+            .starts_with("/assets");
+
         if !on_music && !on_maps && shortcut::consume(&ctx, GOTO_ROW) {
             self.goto_window = Some(goto::GoToWindow::to_row());
         }
@@ -306,7 +329,7 @@ impl App {
         self.update_sheet_languages(&ctx);
         self.pr_window.poll(&ctx);
         about::draw(&ctx, &mut self.about_open);
-        self.draw_menubar(ui, on_music, on_maps);
+        self.draw_menubar(ui, on_music, on_maps, on_icons, on_assets);
         self.draw_logger(ui.ctx());
         self.draw_pr_window(ui.ctx());
         self.draw_export_progress_window(ui.ctx());
@@ -470,7 +493,7 @@ impl App {
         }
     }
 
-    fn draw_menubar(&mut self, ui: &mut egui::Ui, on_music: bool, on_maps: bool) {
+    fn draw_menubar(&mut self, ui: &mut egui::Ui, on_music: bool, on_maps: bool, on_icons: bool, on_assets: bool) {
         let ctx = &ui.ctx().clone();
         Panel::top("top_panel")
             .frame(
@@ -839,17 +862,26 @@ impl App {
                     }
 
                     let seg = egui::vec2(72.0, ui.spacing().interact_size.y);
-                    let switcher_w = 3.0 * seg.x + 2.0 * ui.spacing().item_spacing.x;
+                    let switcher_w = 5.0 * seg.x + 4.0 * ui.spacing().item_spacing.x;
                     let target_left = bar_left + bar_width / 2.0 - switcher_w / 2.0;
                     let space = target_left - ui.cursor().left();
                     if space > 0.0 {
                         ui.add_space(space);
                     }
                     if ui
-                        .add_sized(seg, Button::selectable(!on_music && !on_maps, "数据列表"))
+                        .add_sized(
+                            seg,
+                            Button::selectable(!on_music && !on_maps && !on_icons && !on_assets, "数据列表"),
+                        )
                         .clicked()
                     {
                         self.navigate("/sheet");
+                    }
+                    if ui
+                        .add_sized(seg, Button::selectable(on_icons, "图标列表"))
+                        .clicked()
+                    {
+                        self.navigate("/icons");
                     }
                     if ui
                         .add_sized(seg, Button::selectable(on_maps, "地图列表"))
@@ -862,6 +894,12 @@ impl App {
                         .clicked()
                     {
                         self.navigate("/music");
+                    }
+                    if ui
+                        .add_sized(seg, Button::selectable(on_assets, "资源列表"))
+                        .clicked()
+                    {
+                        self.navigate("/assets");
                     }
 
                     add_links(ui, &mut self.about_open);
@@ -2132,6 +2170,87 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
         RouteResponse::Title("地图".to_string())
     }
 
+    fn on_icons(
+        &mut self,
+        _ui: &mut egui::Ui,
+        path: &Path,
+        _params: &Params<'_, '_>,
+    ) -> RouteResponse {
+        if let Some(r) = self.ensure_backend(path) {
+            return r;
+        }
+        if let Some(icon_id) = self.icons.selected() {
+            return RouteResponse::Redirect(Path::from(format!("/icons/{icon_id}")));
+        }
+        RouteResponse::Title("图标列表".to_string())
+    }
+
+    fn on_icon(
+        &mut self,
+        _ui: &mut egui::Ui,
+        path: &Path,
+        _params: &Params<'_, '_>,
+    ) -> RouteResponse {
+        if let Some(r) = self.ensure_backend(path) {
+            return r;
+        }
+        RouteResponse::Title("图标".to_string())
+    }
+
+    fn draw_icons(&mut self, ui: &mut egui::Ui, _path: &Path, _params: &Params<'_, '_>) {
+        if let Some(backend) = self.backend.clone()
+            && let Some(action) = self.icons.ui(ui, &backend, &self.icon_manager)
+        {
+            match action {
+                icons::Action::Select(icon_id) => self.navigate(format!("/icons/{icon_id}")),
+                icons::Action::Navigate(route) => self.navigate(route),
+            }
+        }
+    }
+
+    fn on_assets(
+        &mut self,
+        _ui: &mut egui::Ui,
+        path: &Path,
+        _params: &Params<'_, '_>,
+    ) -> RouteResponse {
+        if let Some(r) = self.ensure_backend(path) {
+            return r;
+        }
+        if let Some(asset) = self.assets.selected() {
+            return RouteResponse::Redirect(Path::from(format!("/assets/{asset}")));
+        }
+        RouteResponse::Title("资源列表".to_string())
+    }
+
+    fn on_asset_path(
+        &mut self,
+        _ui: &mut egui::Ui,
+        path: &Path,
+        params: &Params<'_, '_>,
+    ) -> RouteResponse {
+        if let Some(r) = self.ensure_backend(path) {
+            return r;
+        }
+        let Some(asset) = params.get("path") else {
+            return RouteResponse::Redirect(Path::from("/assets"));
+        };
+        self.assets.request(asset.to_string());
+        RouteResponse::Title("资源列表".to_string())
+    }
+
+    fn draw_assets(&mut self, ui: &mut egui::Ui, _path: &Path, _params: &Params<'_, '_>) {
+        if let Some(backend) = self.backend.clone()
+            && let Some(action) = self.assets.ui(ui, &backend)
+        {
+            match action {
+                assets::Action::Select(asset) => self.navigate(format!("/assets/{asset}")),
+                assets::Action::Navigate(route) => self.navigate(route),
+                assets::Action::Redirect(asset) => self.navigate_replace(format!("/assets/{asset}")),
+            }
+        }
+    }
+
     fn draw_maps(&mut self, ui: &mut egui::Ui, _path: &Path, _params: &Params<'_, '_>) {
         if let Some(backend) = self.backend.clone()
             && let Some(event) = self.map.ui(ui, &backend, LANGUAGE.get(ui.ctx()))
@@ -3230,6 +3349,8 @@ impl App {
             about_open: false,
             music: music::MusicPlayer::default(),
             map: crate::map::MapViewer::default(),
+            icons: icons::IconBrowser::default(),
+            assets: assets::AssetBrowser::default(),
             last_system_theme: None,
             loaded_cjk: None,
             #[cfg(target_arch = "wasm32")]

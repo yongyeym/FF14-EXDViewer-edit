@@ -20,7 +20,10 @@ use egui::{
     text::LayoutJob,
 };
 pub use filter::{ComplexFilter, FilterInput, FilterInputType};
+pub(crate) use cell::{draw_color, read_integer};
 pub use global_context::GlobalContext;
+pub use schema_column::{SchemaColumn, SchemaColumnMeta};
+pub use sheet_column::SheetColumnDefinition;
 use intmap::IntMap;
 use ironworks::sestring::SeStr;
 pub use sheet_table::SheetTable;

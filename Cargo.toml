@@ -1,14 +1,16 @@
 [workspace]
-members = ["pathlist", "viewer", "web"]
+members = ["glyphnames", "luadec", "pathlist", "shaders", "shadermerge", "viewer", "web"]
 resolver = "3"
 
 [workspace.package]
-version = "1.7.1"
+version = "1.9.1"
 authors = ["Asriel Camora <asriel@camora.dev>"]
 repository = "https://github.com/WorkingRobot/EXDViewer"
 edition = "2024"
 
 [patch.crates-io]
+dxbc = { path = "deps/d3dasm/crates/dxbc" }
+hlsl = { path = "deps/d3dasm/crates/hlsl" }
 ironworks = { path = "deps/ironworks/ironworks" }
 xiv-dl-cache = { path = "deps/ffxiv-downloader/rust/cache" }
 xiv-dl-core = { path = "deps/ffxiv-downloader/rust/core" }

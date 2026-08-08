@@ -7,7 +7,7 @@ mod structs;
 
 pub use {
 	container::ModelContainer,
-	mesh::{Mesh, VertexAttribute, VertexValues},
-	model::{Lod, Model},
-	structs::VertexAttributeKind,
+	mesh::{Mesh, Submesh, VertexAttribute, VertexValues},
+	model::{Lod, MeshKind, Model, Shape},
+	structs::{VertexAttributeKind, VertexFormat},
 };

@@ -700,7 +700,7 @@ pub(crate) fn draw_icon_modal(
     resp.should_close()
 }
 
-fn draw_color(ui: &mut egui::Ui, color: Color32) -> egui::Response {
+pub(crate) fn draw_color(ui: &mut egui::Ui, color: Color32) -> egui::Response {
     let resp = {
         let (rect, response) =
             ui.allocate_at_least(ui.available_size_before_wrap(), Sense::click());

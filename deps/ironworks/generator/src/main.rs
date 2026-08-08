@@ -9,7 +9,7 @@ use generate::generate_sheet;
 use ironworks::{
 	excel::Excel,
 	sqpack::{Install, SqPack},
-	Ironworks,
+	Ironworks, Resource,
 };
 use ironworks_schema::{saint_coinach::Provider, Schema, Sheet as SchemaSheet};
 use quote::{format_ident, quote};
@@ -52,7 +52,8 @@ fn main() -> Result<()> {
 		Some(path) => Install::at(&path),
 		None => Install::search().context("Game path search failed.")?,
 	};
-	let ironworks = Ironworks::new().with_resource(SqPack::new(fs_resource));
+	let ironworks =
+		Ironworks::new().with_resource(Box::new(SqPack::new(fs_resource)) as Box<dyn Resource>);
 	let excel = Excel::new(std::sync::Arc::new(ironworks));
 
 	let (provider, version, schemas) = saint_coinach()?;

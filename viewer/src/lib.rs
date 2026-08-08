@@ -23,6 +23,8 @@
 
 mod about;
 mod app;
+pub mod assets;
+pub mod icons;
 pub mod audio;
 mod backend;
 pub mod column_layout;

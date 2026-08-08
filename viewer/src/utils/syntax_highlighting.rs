@@ -63,6 +63,17 @@ pub struct CodeTheme {
 }
 
 impl CodeTheme {
+    /// The background and foreground colors of the theme, if it declares them.
+    pub fn surface(&self) -> Option<(egui::Color32, egui::Color32)> {
+        let held = THEME_SET.themes.get(&self.theme)?;
+        let color =
+            |from: syntect::highlighting::Color| egui::Color32::from_rgb(from.r, from.g, from.b);
+        Some((
+            color(held.settings.background?),
+            color(held.settings.foreground?),
+        ))
+    }
+
     /// A Vec of (id, name) of all available themes
     pub fn themes() -> Vec<(&'static str, &'static str)> {
         THEME_SET

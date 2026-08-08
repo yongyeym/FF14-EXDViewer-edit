@@ -1,8 +1,8 @@
 use anyhow::Result;
-use std::{num::NonZeroUsize, rc::Rc};
+use std::{cell::RefCell, num::NonZeroUsize, rc::Rc};
 
 use crate::{
-    data::{FileProvider, web::WebFileProvider},
+    data::{FileProvider, IconIndex, web::WebFileProvider},
     excel::base::CachedProvider,
     schema::{boxed::BoxedSchemaProvider, web::WebProvider},
     settings::{BackendConfig, InstallLocation, SchemaLocation},
@@ -16,6 +16,7 @@ struct BackendImpl {
     excel_provider: CachedProvider,
     schema_provider: BoxedSchemaProvider,
     game_version: Option<String>,
+    icons: RefCell<Option<IconIndex>>,
 }
 
 impl Backend {
@@ -90,12 +91,24 @@ impl Backend {
             excel_provider,
             schema_provider: schema,
             game_version,
+            icons: RefCell::new(None),
         })))
     }
 
     /// The shared raw-file provider. Read any game file with
     /// [`FileProviderExt::file`](crate::data::FileProviderExt::file), e.g.
     /// `backend.files().file::<Vec<u8>>(path)`.
+    pub fn icons(&self) -> Option<IconIndex>
+    where
+        IconIndex: Clone,
+    {
+        self.0.icons.borrow().clone()
+    }
+
+    pub fn set_icons(&self, icons: IconIndex) {
+        *self.0.icons.borrow_mut() = Some(icons);
+    }
+
     pub fn files(&self) -> &Rc<dyn FileProvider> {
         &self.0.files
     }

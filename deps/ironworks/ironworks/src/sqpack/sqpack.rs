@@ -10,7 +10,7 @@ use crate::{
 
 use super::{
 	file::File,
-	index::{Index, IndexEntry},
+	index::{Index, IndexEntry, IndexHash},
 };
 
 const CATEGORIES: &[Option<&str>] = &[
@@ -85,6 +85,24 @@ impl<R: sqpack::Resource> SqPack<R> {
 		let dat = self.resource.file(repository, category, location)?;
 
 		// TODO: Cache files? Tempted to say it's the IW struct's responsibility. Is it even possible here with streams?
+		File::new(dat)
+	}
+
+	/// Read a file identified only by its index hash.
+	pub fn file_by_hash(
+		&self,
+		repository: u8,
+		category: u8,
+		hash: IndexHash,
+	) -> Result<File<R::File>> {
+		let location = self
+			.indexes
+			.try_get_or_insert((repository, category), || {
+				Index::new(repository, category, self.resource.clone())
+			})?
+			.find_hash(hash)?;
+
+		let dat = self.resource.file(repository, category, location)?;
 		File::new(dat)
 	}
 

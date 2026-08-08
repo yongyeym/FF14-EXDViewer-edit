@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex};
+use std::{
+	collections::HashMap,
+	sync::{Arc, Mutex},
+};
 
 use binrw::BinRead;
 use getset::CopyGetters;
@@ -9,6 +12,8 @@ use crate::{
 };
 
 use super::{index1::Index1, index2::Index2, shared::FileMetadata};
+
+const CHUNK_MISS_TOLERANCE: u16 = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum IndexHash {
@@ -24,6 +29,11 @@ impl IndexHash {
 			Index1::hash(path).map(Self::Split),
 			Self::Whole(Index2::hash(path)),
 		)
+	}
+
+	/// The hash of a directory on its own (upper half of [`Split`](Self::Split))
+	pub fn directory(path: &str) -> u32 {
+		super::crc::crc32(path.as_bytes())
 	}
 }
 
@@ -50,6 +60,31 @@ pub struct Location {
 	size: Option<u64>,
 }
 
+impl Location {
+	fn new(chunk: u8, (metadata, size): (FileMetadata, Option<u64>)) -> Self {
+		Self {
+			chunk,
+			data_file: metadata.data_file_id,
+			offset: metadata.offset,
+			size,
+		}
+	}
+}
+
+/// The chunk a path is stored in.
+fn path_chunk(repository: u8, path: &str) -> u8 {
+	if repository == 0 {
+		return 0;
+	}
+
+	path.split('/')
+		.nth(2)
+		.and_then(|zone| zone.get(..2))
+		.filter(|digits| digits.bytes().all(|byte| byte.is_ascii_digit()))
+		.and_then(|digits| digits.parse().ok())
+		.unwrap_or(0)
+}
+
 #[derive(Debug)]
 pub struct Index<R> {
 	repository: u8,
@@ -57,7 +92,8 @@ pub struct Index<R> {
 
 	resource: Arc<R>,
 	max_chunk: Mutex<Option<u16>>,
-	chunks: Mutex<Vec<Arc<IndexChunk>>>,
+	chunks: Mutex<HashMap<u8, Option<Arc<IndexChunk>>>>,
+	whole: Mutex<HashMap<u8, Option<Arc<Index2>>>>,
 }
 
 impl<R: Resource> Index<R> {
@@ -67,7 +103,8 @@ impl<R: Resource> Index<R> {
 			category,
 			resource,
 			max_chunk: None.into(),
-			chunks: Vec::new().into(),
+			chunks: Default::default(),
+			whole: Default::default(),
 		})
 	}
 
@@ -96,22 +133,89 @@ impl<R: Resource> Index<R> {
 		Ok(entries)
 	}
 
+	/// Locate a file by its index hash.
+	pub fn find_hash(&self, hash: IndexHash) -> Result<Location> {
+		let not_found = || Error::NotFound(ErrorValue::Other(format!("hash {hash:?}")));
+
+		let whole = match hash {
+			// A split hash names at most one file across a category's chunks, so the first chunk
+			// to claim it is the answer and there is no reason to read the rest.
+			IndexHash::Split(split) => {
+				return self
+					.chunks()
+					.find_map(|chunk| {
+						let (index, chunk) = match chunk {
+							Ok(value) => value,
+							Err(error) => return Some(Err(error)),
+						};
+						match &*chunk {
+							IndexChunk::Index1(index1) => index1.find_hash(split),
+							IndexChunk::Index2(_) => None,
+						}
+						.map(|located| Ok(Location::new(index, located)))
+					})
+					.unwrap_or_else(|| Err(not_found()));
+			}
+			IndexHash::Whole(whole) => whole,
+		};
+
+		let ambiguous = || {
+			Error::Invalid(
+				ErrorValue::Other(format!("hash {hash:?}")),
+				"names more than one file, so it can only be read by path".into(),
+			)
+		};
+		let look_up = |index2: &Index2| (index2.find_hash(whole), index2.is_shared(whole));
+
+		let mut found = None;
+		for chunk in self.chunks() {
+			let (index, chunk) = chunk?;
+			let (located, shared) = match &*chunk {
+				IndexChunk::Index2(index2) => look_up(index2),
+				IndexChunk::Index1(_) => self
+					.whole_chunk(index)?
+					.as_deref()
+					.map_or((None, false), look_up),
+			};
+
+			if shared {
+				return Err(ambiguous());
+			}
+
+			match (located, &found) {
+				(Some(located), None) => found = Some(Location::new(index, located)),
+				// The same whole-path hash can turn up in two chunks, where nothing at all records
+				// which was meant.
+				(Some(_), Some(_)) => return Err(ambiguous()),
+				(None, _) => (),
+			}
+		}
+
+		found.ok_or_else(not_found)
+	}
+
 	pub fn find(&self, path: &str) -> Result<Location> {
+		let expected = path_chunk(self.repository, path);
+		if let Some(chunk) = self.chunk(expected)? {
+			if let Ok(located) = chunk.find(path) {
+				return Ok(Location::new(expected, located));
+			}
+		}
+
 		let location = self.chunks().find_map(|chunk| {
 			let (index, chunk) = match chunk {
 				Ok(value) => value,
 				Err(error) => return Some(Err(error)),
 			};
 
+			if index == expected {
+				return None;
+			}
+
 			match chunk.find(path) {
 				Err(Error::NotFound(_)) => None,
 				Err(error) => Some(Err(error)),
-				Ok((meta, size)) => Some(Ok(Location {
-					chunk: index,
-					data_file: meta.data_file_id,
-					offset: meta.offset,
-					size,
-				})),
+				Ok(located) => Some(Ok(Location::new(index, located))),
 			}
 		});
 
@@ -121,55 +225,71 @@ impl<R: Resource> Index<R> {
 		}
 	}
 
+	/// The chunk with the given ID. `None` if the category has no such chunk.
+	fn chunk(&self, chunk: u8) -> Result<Option<Arc<IndexChunk>>> {
+		if let Some(known) = self.chunks.lock().unwrap().get(&chunk) {
+			return Ok(known.clone());
+		}
+
+		let built = match IndexChunk::new(self.repository, self.category, chunk, &*self.resource) {
+			Ok(built) => Some(Arc::new(built)),
+			// Remembered as absent so a later lookup does not probe the resource for it again.
+			Err(Error::NotFound(_)) => None,
+			Err(error) => return Err(error),
+		};
+
+		self.chunks.lock().unwrap().insert(chunk, built.clone());
+		Ok(built)
+	}
+
+	/// The `.index2` of a chunk that also ships an `.index`, read on first use.
+	fn whole_chunk(&self, chunk: u8) -> Result<Option<Arc<Index2>>> {
+		if let Some(known) = self.whole.lock().unwrap().get(&chunk) {
+			return Ok(known.clone());
+		}
+
+		let built = match self.resource.index2(self.repository, self.category, chunk) {
+			Ok(mut reader) => Some(Arc::new(Index2::read(&mut reader)?)),
+			Err(Error::NotFound(_)) => None,
+			Err(error) => return Err(error),
+		};
+
+		self.whole.lock().unwrap().insert(chunk, built.clone());
+		Ok(built)
+	}
+
 	fn chunks(&self) -> impl Iterator<Item = Result<(u8, Arc<IndexChunk>)>> + '_ {
 		// Get the max known chunk ID. If we don't know it, we want to loop the full potential ID space (u8).
-		let guard = self.max_chunk.lock().unwrap();
-		let max_chunk = guard.unwrap_or(256);
-		drop(guard);
+		let max_chunk = self.max_chunk.lock().unwrap().unwrap_or(256);
 
-		(0u16..max_chunk).map_while(|index| {
-			let index_usize = usize::from(index);
-			let index_u8 = u8::try_from(index).unwrap();
+		(0u16..max_chunk)
+			.scan(0u16, |misses, index| {
+				let id = u8::try_from(index).unwrap();
 
-			// If we've already loaded this chunk index, use that.
-			let guard = self.chunks.lock().unwrap();
-			if let Some(chunk) = guard.get(index_usize) {
-				return Some(Ok((index_u8, chunk.clone())));
-			}
-			drop(guard);
-
-			// Try to build a new chunk.
-			let chunk = IndexChunk::new(
-				self.repository,
-				self.category,
-				index.try_into().unwrap(),
-				&*self.resource,
-			);
-
-			match chunk {
-				// Found an index - save it out to the cache.
-				Ok(chunk) => {
-					let mut guard = self.chunks.lock().unwrap();
-					// The lock was released while reading, so another lookup may have stored this
-					// chunk already.
-					if guard.len() == index_usize {
-						guard.push(chunk.into());
+				match self.chunk(id) {
+					Ok(Some(chunk)) => {
+						*misses = 0;
+						Some(Some(Ok((id, chunk))))
 					}
-					guard
-						.get(index_usize)
-						.map(|chunk| Ok((index_u8, chunk.clone())))
-				}
 
-				// No index was found for this chunk - mark index as the max chunk point so we don't do that again.
-				Err(Error::NotFound(_)) => {
-					*self.max_chunk.lock().unwrap() = Some(index);
-					None
-				}
+					// Chunk IDs are not contiguous in live data, so a hole is not the end of the
+					// category; only a run of them means we have walked off the end of it.
+					Ok(None) => {
+						*misses += 1;
+						match *misses >= CHUNK_MISS_TOLERANCE {
+							true => {
+								*self.max_chunk.lock().unwrap() = Some(index + 1 - *misses);
+								None
+							}
+							false => Some(None),
+						}
+					}
 
-				// Some other error occured, surface it.
-				Err(error) => Some(Err(error)),
-			}
-		})
+					// Some other error occured, surface it.
+					Err(error) => Some(Some(Err(error))),
+				}
+			})
+			.flatten()
 	}
 }
 
@@ -197,6 +317,47 @@ impl IndexChunk {
 		match self {
 			Self::Index1(index) => index.find(path),
 			Self::Index2(index) => index.find(path),
+		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::{IndexHash, path_chunk};
+
+	#[test]
+	fn an_expansion_zone_names_its_chunk() {
+		for (repository, path, chunk) in [
+			(5, "bg/ex5/06_nvt_n6/cnt/n6c6/bgparts/n6c6_xx_bfi04.mdl", 6),
+			(
+				2,
+				"bg/ex2/01_gyr_g3/fld/g3f2/collision/g3f2_t1_nat03.pcb",
+				1,
+			),
+			(4, "bg/ex4/09_ocn_o5/common/vfx/eff/b2745dart1_f1.avfx", 9),
+			// Everything an expansion ships outside a numbered zone shares chunk 0.
+			(1, "cut/ex1/banall/banall00001.pap", 0),
+			(4, "music/ex4/bgm_ex4_wks_01.scd", 0),
+			// The base repository is chunk 0 throughout, digits in the path or not.
+			(0, "bg/ffxiv/sea_s1/fld/s1f2/grass/038_004_012_l.ggd", 0),
+			(0, "ui/icon/150000/de/150751_hr1.tex", 0),
+			(0, "exd/root.exl", 0),
+		] {
+			assert_eq!(path_chunk(repository, path), chunk, "{path}");
+		}
+	}
+
+	#[test]
+	fn directory_matches_the_upper_half_of_a_split_hash() {
+		for (dir, file) in [
+			("music/ffxiv", "BGM_Null.scd"),
+			("exd", "root.exl"),
+			("common/savedata", "anything.dat"),
+		] {
+			let Some(IndexHash::Split(split)) = IndexHash::of(&format!("{dir}/{file}")).0 else {
+				panic!("no split hash for {dir}/{file}");
+			};
+			assert_eq!(IndexHash::directory(dir), (split >> 32) as u32, "{dir}");
 		}
 	}
 }

@@ -1,11 +1,11 @@
-use std::io::{Cursor, Empty, Read, Seek, SeekFrom};
+use std::io::{self, Cursor, Empty, Read, Seek, SeekFrom};
 
 use binrw::BinRead;
 
 use crate::{error::Result, sqpack::block::BlockStream};
 
 use super::{
-	empty, model,
+	model,
 	shared::{FileKind, Header},
 	standard, texture,
 };
@@ -14,6 +14,7 @@ use super::{
 /// A stream of data for a file read from a sqpack dat archive.
 #[derive(Debug)]
 pub struct File<R> {
+	kind: FileKind,
 	inner: FileStreamKind<R>,
 }
 
@@ -22,16 +23,29 @@ impl<R: Read + Seek> File<R> {
 	pub fn new(mut reader: R) -> Result<Self> {
 		// Read in the header.
 		let header = Header::read(&mut reader)?;
+		let kind = header.kind;
 
 		use FileStreamKind as FSK;
-		let file_stream = match &header.kind {
-			FileKind::Empty => FSK::Empty(empty::read(reader, header)?),
+		let file_stream = match kind {
+			// An empty file has no blocks to read; whether it is a placeholder or something
+			// needing processing that doesn't belong in sqpack is for the caller to decide.
+			// TODO: if type 1 and first 64 == second 64, RSF
+			//       if type 1 and first 64 == [0..], empty
+			FileKind::Empty => FSK::Empty(io::empty()),
 			FileKind::Standard => FSK::Standard(standard::read(reader, header.size, header)?),
 			FileKind::Model => FSK::Model(model::read(reader, header.size, header)?),
 			FileKind::Texture => FSK::Texture(texture::read(reader, header.size, header)?),
 		};
 
-		Ok(File { inner: file_stream })
+		Ok(File {
+			kind,
+			inner: file_stream,
+		})
+	}
+
+	/// How sqpack stores this file's data.
+	pub fn kind(&self) -> FileKind {
+		self.kind
 	}
 }
 

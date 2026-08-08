@@ -4,6 +4,7 @@ mod collapsible_side_panel;
 mod color_theme;
 mod convertible_promise;
 mod icon_manager;
+mod icon_modal;
 #[cfg(target_arch = "wasm32")]
 mod jserror;
 mod matcher;
@@ -19,11 +20,12 @@ mod webreq;
 mod yield_now;
 
 pub use cache::KeyedCache;
-pub use cloneable_error::CloneableResult;
+pub use cloneable_error::{CloneableError, CloneableResult};
 pub use collapsible_side_panel::{CollapsibleSidePanel, Side};
 pub use color_theme::ColorTheme;
 pub use convertible_promise::{ConvertiblePromise, PromiseKind};
 pub use icon_manager::{IconManager, ManagedIcon};
+pub use icon_modal::icon_modal;
 #[cfg(target_arch = "wasm32")]
 pub use jserror::{JsErr, JsResult};
 pub use matcher::FuzzyMatcher;
@@ -35,3 +37,8 @@ pub use unsend_promise::UnsendPromise;
 pub use version::GameVersion;
 pub use webreq::{HttpResponse, fetch_url, fetch_url_str, request};
 pub use yield_now::yield_to_ui;
+
+/// The last segment of a game path. Paths are always slash-separated, so this is the file name.
+pub fn file_name(path: &str) -> &str {
+    path.rsplit('/').next().unwrap_or(path)
+}

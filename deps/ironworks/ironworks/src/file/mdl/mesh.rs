@@ -6,9 +6,12 @@ use std::{
 use binrw::{BinRead, NullString, VecArgs};
 use half::f16;
 
-use crate::error::Result;
+use crate::error::{Error, ErrorValue, Result};
 
-use super::{model::Lod, structs};
+use super::{
+	model::{Lod, MeshKind},
+	structs,
+};
 
 // TODO: improve the debug output of these things
 /// A single mesh within a model.
@@ -18,11 +21,31 @@ pub struct Mesh {
 
 	pub(super) level: Lod,
 	pub(super) mesh_index: usize,
+	pub(super) kinds: Vec<MeshKind>,
 }
 
 impl Mesh {
 	// TODO: bones
-	// TODO: submeshes
+
+	/// What the model draws this mesh for. A mesh listed in more than one of the lod's ranges
+	/// carries every kind that names it.
+	pub fn kinds(&self) -> &[MeshKind] {
+		&self.kinds
+	}
+
+	/// The runs of [`indices`](Self::indices) the mesh is split into, in the order it lists them.
+	pub fn submeshes(&self) -> Vec<Submesh> {
+		let mesh = &self.file.meshes[self.mesh_index];
+		let first = usize::from(mesh.sub_mesh_index);
+		self.file.submeshes[first..first + usize::from(mesh.sub_mesh_count)]
+			.iter()
+			.map(|submesh| Submesh {
+				start: (submesh.index_offset - mesh.start_index) as usize,
+				count: submesh.index_count as usize,
+				attributes: submesh.attribute_index_mask,
+			})
+			.collect()
+	}
 
 	// TODO: i'm not sure this should be specific to mesh - the list of materials on the model might be useful in some cases. should i use a ref to the parent model and read off that, rather than the arc of a file?
 	/// Path to the material associated with this mesh.
@@ -53,7 +76,7 @@ impl Mesh {
 		let indices = <Vec<u16>>::read_le_args(
 			&mut cursor,
 			VecArgs {
-				count: mesh.index_count.try_into().unwrap(),
+				count: mesh.index_count as usize,
 				inner: (),
 			},
 		)?;
@@ -70,15 +93,13 @@ impl Mesh {
 		// Get the elements for this mesh's vertices.
 		let elements = &self.file.vertex_declarations[self.mesh_index].0;
 
-		// Vertices are stored across multipe streams of data - set up a cursor for each.
-		let mut streams = (0..usize::from(mesh.vertex_stream_count))
-			.map(|index| {
-				let cursor = Cursor::new(&self.file.data);
-				let offset = self.file.vertex_offset[usize::from(self.level)]
-					+ mesh.vertex_buffer_offset[index];
-				(cursor, u64::from(offset) - self.file.data_offset)
-			})
-			.collect::<Vec<_>>();
+		// Vertices are stored across multipe streams of data - set up a cursor for each. A mesh
+		// can name more streams than it carries offsets for, so the offsets are what bound this.
+		let mut streams = mesh.vertex_buffer_offset.map(|buffer_offset| {
+			let cursor = Cursor::new(&self.file.data);
+			let offset = self.file.vertex_offset[usize::from(self.level)] + buffer_offset;
+			(cursor, u64::from(offset) - self.file.data_offset)
+		});
 
 		// Read in the vertices
 		// TODO: keep an eye on perf here - could thrash cache a bit if llvm doesn't magic it enough
@@ -86,7 +107,13 @@ impl Mesh {
 			.iter()
 			.map(|element| -> Result<_> {
 				let stream = usize::from(element.stream);
-				let (ref mut cursor, base_offset) = streams[stream];
+				let Some((cursor, base_offset)) = streams.get_mut(stream) else {
+					return Err(Error::Invalid(
+						ErrorValue::Other("model vertex element".into()),
+						format!("element names stream {stream}, beyond the 3 a mesh carries"),
+					));
+				};
+				let base_offset = *base_offset;
 				let stride = u64::from(mesh.vertex_buffer_stride[stream]);
 
 				let offsets = (0..mesh.vertex_count).scan(
@@ -107,11 +134,19 @@ impl Mesh {
 					K::ByteFloat4 => V::Vector4(read_values(offsets, cursor, bfloat4)?),
 					K::Half2 => V::Vector2(read_values(offsets, cursor, half2)?),
 					K::Half4 => V::Vector4(read_values(offsets, cursor, half4)?),
-					other => todo!("Vertex kind: {other:?}"),
+					K::UByte8 => V::Bytes8(read_values(offsets, cursor, ubyte8)?),
+					K::None => {
+						return Err(Error::Invalid(
+							ErrorValue::Other("model vertex element".into()),
+							"element declares no format".into(),
+						));
+					}
 				};
 
 				Ok(VertexAttribute {
 					kind: element.attribute,
+					format: element.format,
+					usage_index: element.usage_index,
 					values,
 				})
 			})
@@ -173,6 +208,10 @@ fn half2(reader: &mut (impl Read + Seek)) -> Result<[f32; 2]> {
 	])
 }
 
+fn ubyte8(reader: &mut (impl Read + Seek)) -> Result<[u8; 8]> {
+	Ok(<[u8; 8]>::read(reader)?)
+}
+
 fn half4(reader: &mut (impl Read + Seek)) -> Result<[f32; 4]> {
 	Ok([
 		f16::from_bits(u16::read_le(reader)?).to_f32(),
@@ -182,6 +221,18 @@ fn half4(reader: &mut (impl Read + Seek)) -> Result<[f32; 4]> {
 	])
 }
 
+/// One part of a mesh, drawn with the rest of it but hideable on its own.
+#[derive(Clone, Copy, Debug)]
+pub struct Submesh {
+	/// Where the part's indices start within its mesh's own.
+	pub start: usize,
+	/// How many indices it covers.
+	pub count: usize,
+	/// Bits of the model's [`attribute_names`](super::Model::attribute_names), which is the only
+	/// name a part carries.
+	pub attributes: u32,
+}
+
 // todo: public contents? - i mean, it makes sense to an extent.
 /// A vertex attribute of a mesh.
 #[derive(Debug)]
@@ -189,6 +240,10 @@ pub struct VertexAttribute {
 	// todo i'm really not convinced on the name here
 	/// The kind of data represented by this attribute.
 	pub kind: structs::VertexAttributeKind,
+	/// How the values were stored, which decides whether they arrived signed.
+	pub format: structs::VertexFormat,
+	/// Distinguishes attributes sharing a kind, such as a mesh's second UV set.
+	pub usage_index: u8,
 	/// Attribute data values.
 	pub values: VertexValues,
 }
@@ -198,6 +253,7 @@ pub struct VertexAttribute {
 #[derive(Debug)]
 pub enum VertexValues {
 	Uint(Vec<u32>),
+	Bytes8(Vec<[u8; 8]>),
 	Vector2(Vec<[f32; 2]>),
 	Vector3(Vec<[f32; 3]>),
 	Vector4(Vec<[f32; 4]>),

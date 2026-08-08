@@ -10,7 +10,7 @@ mod vinstall;
 
 pub use {
 	block::{BlockMetadata, BlockPayload, BlockStream},
-	file::File,
+	file::{File, FileKind},
 	index::{IndexEntry, IndexHash, Location},
 	install::Install,
 	resource::Resource,

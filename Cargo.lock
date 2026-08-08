@@ -1558,6 +1558,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "crc"
+version = "3.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5eb8a2a1cd12ab0d987a5d5e825195d372001a4094a0376319d5a0ad71c1ba0d"
+dependencies = [
+ "crc-catalog",
+]
+
+[[package]]
+name = "crc-catalog"
+version = "2.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "217698eaf96b4a3f0bc4f3662aaa55bdf913cd54d7204591faa790070c6d0853"
+
+[[package]]
 name = "crc32fast"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1830,6 +1845,15 @@ name = "dunce"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
+
+[[package]]
+name = "dxbc"
+version = "0.1.0"
+dependencies = [
+ "memchr",
+ "nostdio",
+ "smallvec",
+]
 
 [[package]]
 name = "ecolor"
@@ -2326,7 +2350,7 @@ checksum = "b97b65636e5b9ef369943878ac74335ba1c55c1cb6adbf1e2c293c624248d693"
 
 [[package]]
 name = "ff14-exdviewer-edit"
-version = "1.7.1"
+version = "1.9.1"
 dependencies = [
  "anyhow",
  "arboard",
@@ -2334,13 +2358,17 @@ dependencies = [
  "async-trait",
  "base64 0.23.0",
  "binrw",
+ "bytemuck",
  "catppuccin-egui",
  "compact_str",
+ "crc",
  "cridecoder",
  "csv",
+ "dxbc",
  "eframe",
  "egui",
  "egui_extras",
+ "egui_glow",
  "egui_logger",
  "egui_table",
  "ehttp",
@@ -2348,7 +2376,12 @@ dependencies = [
  "env_logger",
  "futures-util",
  "getrandom 0.4.3",
+ "glam",
  "gloo-worker",
+ "glow",
+ "glyphnames",
+ "half",
+ "hlsl",
  "image",
  "image_dds",
  "indexed-db",
@@ -2358,6 +2391,7 @@ dependencies = [
  "jsonschema",
  "log",
  "lru",
+ "luadec",
  "matchit",
  "nucleo-matcher",
  "num-traits",
@@ -2376,6 +2410,8 @@ dependencies = [
  "serde_json",
  "serde_yml",
  "sha2",
+ "shadermerge",
+ "shaders",
  "shadow-rs",
  "smallvec",
  "symphonia",
@@ -2820,6 +2856,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "glam"
+version = "0.31.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "556f6b2ea90b8d15a74e0e7bb41671c9bdf38cd9f78c284d750b9ce58a2b5be7"
+
+[[package]]
 name = "glifo"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2949,6 +2991,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2c4ee00b289aba7a9e5306d57c2d05499b2e5dc427f84ac708bd2c090212cf3e"
 dependencies = [
  "gl_generator",
+]
+
+[[package]]
+name = "glyphnames"
+version = "1.9.1"
+dependencies = [
+ "unicode_names2",
 ]
 
 [[package]]
@@ -3155,6 +3204,13 @@ name = "hexf-parse"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
+
+[[package]]
+name = "hlsl"
+version = "0.1.0"
+dependencies = [
+ "dxbc",
+]
 
 [[package]]
 name = "home"
@@ -3537,12 +3593,15 @@ name = "ironworks"
 version = "0.4.1"
 dependencies = [
  "binrw",
+ "crc32fast",
  "derivative",
  "either",
  "enum-as-inner",
  "flate2",
  "getset",
+ "half",
  "memchr",
+ "modular-bitfield",
  "num_enum",
  "serde",
  "strum 0.26.3",
@@ -4008,6 +4067,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
+name = "luadec"
+version = "1.9.1"
+
+[[package]]
 name = "lz4"
 version = "1.28.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4157,6 +4220,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "modular-bitfield"
+version = "0.11.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a53d79ba8304ac1c4f9eb3b9d281f21f7be9d4626f72ce7df4ad8fbde4f38a74"
+dependencies = [
+ "modular-bitfield-impl",
+ "static_assertions",
+]
+
+[[package]]
+name = "modular-bitfield-impl"
+version = "0.11.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a7d5f7076603ebc68de2dc6a650ec331a062a13abaa346975be747bbfa4b789"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "moka"
 version = "0.12.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4266,6 +4350,12 @@ name = "nohash-hasher"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2bf50223579dc7cdcfb3bfcacf7069ff68243f8c363f62ffa99cf000a6b9c451"
+
+[[package]]
+name = "nostdio"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4dd90a73af33ea00621a62c02e1c918457df504135180c959577099f043b9e2e"
 
 [[package]]
 name = "noyalib"
@@ -4847,9 +4937,10 @@ checksum = "df94ce210e5bc13cb6651479fa48d14f601d9858cfe0467f43ae157023b938d3"
 
 [[package]]
 name = "pathlist"
-version = "1.7.1"
+version = "1.9.1"
 dependencies = [
  "anyhow",
+ "ironworks",
  "zstd",
 ]
 
@@ -4933,6 +5024,16 @@ dependencies = [
  "phf_macros 0.13.1",
  "phf_shared 0.13.1",
  "serde",
+]
+
+[[package]]
+name = "phf_codegen"
+version = "0.11.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aef8048c789fa5e851558d709946d6d79a8ff88c0440c587967f8e94bfb1216a"
+dependencies = [
+ "phf_generator 0.11.3",
+ "phf_shared 0.11.3",
 ]
 
 [[package]]
@@ -5413,6 +5514,8 @@ version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "22f6172bdec972074665ed81ed53b71da00bfc44b65a753cfde883ec4c702a1a"
 dependencies = [
+ "libc",
+ "rand_chacha 0.3.1",
  "rand_core 0.6.4",
 ]
 
@@ -5422,7 +5525,7 @@ version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9ef1d0d795eb7d84685bca4f72f3649f064e6641543d3a8c415898726a57b41"
 dependencies = [
- "rand_chacha",
+ "rand_chacha 0.9.0",
  "rand_core 0.9.5",
 ]
 
@@ -5435,6 +5538,16 @@ dependencies = [
  "chacha20",
  "getrandom 0.4.3",
  "rand_core 0.10.1",
+]
+
+[[package]]
+name = "rand_chacha"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e6c10a63a0fa32252be49d21e7709d4d4baf8d231c2dbce1eaa8141b9b127d88"
+dependencies = [
+ "ppv-lite86",
+ "rand_core 0.6.4",
 ]
 
 [[package]]
@@ -5452,6 +5565,9 @@ name = "rand_core"
 version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
+dependencies = [
+ "getrandom 0.2.17",
+]
 
 [[package]]
 name = "rand_core"
@@ -6174,6 +6290,23 @@ dependencies = [
  "cfg-if",
  "cpufeatures",
  "digest",
+]
+
+[[package]]
+name = "shadermerge"
+version = "1.9.1"
+dependencies = [
+ "dxbc",
+ "hlsl",
+ "ironworks",
+ "shaders",
+]
+
+[[package]]
+name = "shaders"
+version = "1.9.1"
+dependencies = [
+ "crc",
 ]
 
 [[package]]
@@ -7080,6 +7213,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 
 [[package]]
+name = "unicode_names2"
+version = "3.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "82c3e18d850bb6ebd57735e5654f0af65e572b05c2397e7b2b1a7c6a792cc29c"
+dependencies = [
+ "phf 0.11.3",
+ "unicode_names2_generator",
+]
+
+[[package]]
+name = "unicode_names2_generator"
+version = "3.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "849744a58c479122ff24910d7ca57f312b62613ef0412dc327776ae6b235d16a"
+dependencies = [
+ "phf_codegen",
+ "rand 0.8.7",
+]
+
+[[package]]
 name = "untrusted"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7493,7 +7646,7 @@ dependencies = [
 
 [[package]]
 name = "web"
-version = "1.7.1"
+version = "1.9.1"
 dependencies = [
  "actix-cors",
  "actix-files",

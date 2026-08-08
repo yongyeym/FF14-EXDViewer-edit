@@ -1,0 +1,21 @@
+[package]
+name = "d3dasm-cli"
+version = "0.1.0"
+edition = "2024"
+description = "CLI tool for disassembling Direct3D shader bytecode"
+license = "MIT"
+repository = "https://github.com/coconutbird/d3dasm"
+homepage = "https://github.com/coconutbird/d3dasm"
+authors = ["Jon-Luke Biddle"]
+keywords = ["dxbc", "directx", "shader", "disassembler", "hlsl"]
+categories = ["command-line-utilities", "game-development"]
+readme = "../../README.md"
+
+[[bin]]
+name = "d3dasm"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5.60", features = ["derive"] }
+d3dasm = { version = "0.1.0", path = "../d3dasm", features = ["std"] }
+dxbc = { version = "0.1.0", path = "../dxbc", features = ["std"] }

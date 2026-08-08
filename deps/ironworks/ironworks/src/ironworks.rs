@@ -1,4 +1,7 @@
-use std::io::{Read, Seek};
+use std::{
+	io::{Read, Seek},
+	rc::Rc,
+};
 
 use derivative::Derivative;
 
@@ -37,6 +40,20 @@ pub trait Resource: 'static {
 }
 
 impl<R: Resource + ?Sized> Resource for Box<R> {
+	fn version(&self, path: &str) -> Result<String> {
+		self.as_ref().version(path)
+	}
+
+	fn file(&self, path: &str) -> Result<Box<dyn FileStream>> {
+		self.as_ref().file(path)
+	}
+
+	fn exists(&self, path: &str) -> Result<bool> {
+		self.as_ref().exists(path)
+	}
+}
+
+impl<R: Resource + ?Sized> Resource for Rc<R> {
 	fn version(&self, path: &str) -> Result<String> {
 		self.as_ref().version(path)
 	}
@@ -123,7 +140,8 @@ impl<R: Resource> Ironworks<R> {
 		Ok(false)
 	}
 
-	fn find_first<F, O>(&self, path: &str, f: F) -> Result<O>
+	/// Search the resources for `path`, last to first.
+	pub fn find_first<F, O>(&self, path: &str, f: F) -> Result<O>
 	where
 		F: Fn(&R) -> Result<O>,
 	{

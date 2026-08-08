@@ -3,4 +3,7 @@
 mod material;
 mod structs;
 
-pub use material::{Material, Sampler};
+pub use material::{
+	AttributeSet, ColorRow, ColorTable, ColorTableKind, Constant, DyeField, DyeRow, Material,
+	Sampler, ShaderKey, Texture,
+};

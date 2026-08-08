@@ -1,0 +1,1246 @@
+//! SM4/SM5 instruction opcodes.
+
+/// Shader bytecode opcode (`D3D10_SB_OPCODE_TYPE`).
+///
+/// Covers the full D3D10–D3D11.3 range. Unknown opcodes are preserved
+/// as `Unknown(u32)` for forward compatibility.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(non_camel_case_types)]
+pub enum Opcode {
+    // D3D10 ALU / flow-control (0–87)
+    /// Floating-point add: `dest = src0 + src1`.
+    Add,
+    /// Bitwise AND: `dest = src0 & src1`.
+    And,
+    /// Break out of a loop.
+    Break,
+    /// Conditional break.
+    Breakc,
+    /// Call a subroutine label.
+    Call,
+    /// Conditional call.
+    Callc,
+    /// Switch-case label.
+    Case,
+    /// Continue to the next loop iteration.
+    Continue,
+    /// Conditional continue.
+    Continuec,
+    /// Geometry shader: cut the current primitive strip.
+    Cut,
+    /// Switch-default label.
+    Default,
+    /// Partial derivative with respect to screen-space X.
+    Deriv_rtx,
+    /// Partial derivative with respect to screen-space Y.
+    Deriv_rty,
+    /// Conditionally discard the current pixel.
+    Discard,
+    /// Floating-point divide: `dest = src0 / src1`.
+    Div,
+    /// Two-component dot product.
+    Dp2,
+    /// Three-component dot product.
+    Dp3,
+    /// Four-component dot product.
+    Dp4,
+    /// Else branch of an if/else block.
+    Else,
+    /// Geometry shader: emit a vertex.
+    Emit,
+    /// Geometry shader: emit a vertex then cut the strip.
+    EmitThenCut,
+    /// End of an if/else block.
+    EndIf,
+    /// End of a loop block.
+    EndLoop,
+    /// End of a switch block.
+    EndSwitch,
+    /// Floating-point equality comparison.
+    Eq,
+    /// Base-2 exponent: `dest = 2^src`.
+    Exp,
+    /// Fractional part: `dest = frac(src)`.
+    Frc,
+    /// Float to signed integer conversion.
+    Ftoi,
+    /// Float to unsigned integer conversion.
+    Ftou,
+    /// Floating-point greater-or-equal comparison.
+    Ge,
+    /// Signed integer add.
+    Iadd,
+    /// Conditional branch.
+    If,
+    /// Signed integer equality comparison.
+    IEq,
+    /// Signed integer greater-or-equal comparison.
+    IGe,
+    /// Signed integer less-than comparison.
+    ILt,
+    /// Signed integer multiply-add.
+    IMad,
+    /// Signed integer maximum.
+    IMax,
+    /// Signed integer minimum.
+    IMin,
+    /// Signed integer multiply (produces hi and lo results).
+    IMul,
+    /// Signed integer not-equal comparison.
+    INe,
+    /// Signed integer negate.
+    INeg,
+    /// Integer shift left.
+    Ishl,
+    /// Signed integer arithmetic shift right.
+    Ishr,
+    /// Signed integer to float conversion.
+    Itof,
+    /// Subroutine label definition.
+    Label,
+    /// Load from a resource (no sampling).
+    Ld,
+    /// Load from a multi-sampled resource.
+    LdMs,
+    /// Base-2 logarithm: `dest = log2(src)`.
+    Log,
+    /// Begin a loop block.
+    Loop,
+    /// Floating-point less-than comparison.
+    Lt,
+    /// Floating-point multiply-add: `dest = src0 * src1 + src2`.
+    Mad,
+    /// Floating-point minimum.
+    Min,
+    /// Floating-point maximum.
+    Max,
+    /// Custom data block (e.g. immediate constant buffer).
+    CustomData,
+    /// Move (copy) a value.
+    Mov,
+    /// Conditional move: `dest = src0 ? src1 : src2`.
+    Movc,
+    /// Floating-point multiply.
+    Mul,
+    /// Floating-point not-equal comparison.
+    Ne,
+    /// No operation.
+    Nop,
+    /// Bitwise NOT.
+    Not,
+    /// Bitwise OR.
+    Or,
+    /// Query resource dimensions / element count.
+    Resinfo,
+    /// Return from the current shader or subroutine.
+    Ret,
+    /// Conditional return.
+    Retc,
+    /// Round to nearest even.
+    Round_ne,
+    /// Round towards negative infinity (floor).
+    Round_ni,
+    /// Round towards positive infinity (ceil).
+    Round_pi,
+    /// Round towards zero (truncate).
+    Round_z,
+    /// Reciprocal square root: `dest = 1 / sqrt(src)`.
+    Rsq,
+    /// Sample a texture.
+    Sample,
+    /// Sample with comparison (shadow sampling).
+    SampleC,
+    /// Sample-compare at LOD zero.
+    SampleCLz,
+    /// Sample at an explicit LOD.
+    SampleL,
+    /// Sample with explicit derivatives.
+    SampleD,
+    /// Sample with a bias applied to the mip level.
+    SampleB,
+    /// Floating-point square root.
+    Sqrt,
+    /// Begin a switch block.
+    Switch,
+    /// Simultaneous sine and cosine.
+    Sincos,
+    /// Unsigned integer divide (quotient and remainder).
+    UDiv,
+    /// Unsigned integer less-than comparison.
+    ULt,
+    /// Unsigned integer greater-or-equal comparison.
+    UGe,
+    /// Unsigned integer multiply (produces hi and lo results).
+    UMul,
+    /// Unsigned integer multiply-add.
+    UMad,
+    /// Unsigned integer maximum.
+    UMax,
+    /// Unsigned integer minimum.
+    UMin,
+    /// Unsigned integer (logical) shift right.
+    Ushr,
+    /// Unsigned integer to float conversion.
+    Utof,
+    /// Bitwise XOR.
+    Xor,
+    // Declarations (88–106)
+    /// Declare a shader resource (SRV).
+    DclResource,
+    /// Declare a constant buffer binding.
+    DclConstantBuffer,
+    /// Declare a sampler state.
+    DclSampler,
+    /// Declare an index range for signature elements.
+    DclIndexRange,
+    /// Declare GS output primitive topology.
+    DclGsOutputPrimitiveTopology,
+    /// Declare GS input primitive type.
+    DclGsInputPrimitive,
+    /// Declare the maximum output vertex count for a GS.
+    DclMaxOutputVertexCount,
+    /// Declare a generic shader input register.
+    DclInput,
+    /// Declare a system-generated value input.
+    DclInputSgv,
+    /// Declare a system-interpreted value input.
+    DclInputSiv,
+    /// Declare a pixel shader input with interpolation mode.
+    DclInputPs,
+    /// Declare a PS system-generated value input.
+    DclInputPsSgv,
+    /// Declare a PS system-interpreted value input.
+    DclInputPsSiv,
+    /// Declare a shader output register.
+    DclOutput,
+    /// Declare a system-generated value output.
+    DclOutputSgv,
+    /// Declare a system-interpreted value output.
+    DclOutputSiv,
+    /// Declare the number of temporary registers.
+    DclTemps,
+    /// Declare an indexable temporary register array.
+    DclIndexableTemp,
+    /// Declare global shader flags (refactoring, doubles, etc.).
+    DclGlobalFlags,
+    // DX10.1 (108–111)
+    /// Query texture LOD.
+    Lod,
+    /// Four-sample gather from a texture.
+    Gather4,
+    /// Query multisample sample position.
+    SamplePos,
+    /// Query multisample sample info.
+    SampleInfo,
+    // DX11 HS phases (113–116)
+    /// Hull shader declarations phase marker.
+    HsDecls,
+    /// Hull shader control-point phase marker.
+    HsControlPointPhase,
+    /// Hull shader fork phase marker.
+    HsForkPhase,
+    /// Hull shader join phase marker.
+    HsJoinPhase,
+    // DX11 stream ops (117–120)
+    /// GS: emit a vertex to a specific stream.
+    EmitStream,
+    /// GS: cut the primitive strip on a specific stream.
+    CutStream,
+    /// GS: emit then cut on a specific stream.
+    EmitThenCutStream,
+    /// Call through a function-pointer interface.
+    InterfaceCall,
+    // DX11 SM5 instructions (121–142)
+    /// Query buffer element count / stride.
+    BufInfo,
+    /// Coarse partial derivative with respect to X.
+    Deriv_rtx_coarse,
+    /// Fine partial derivative with respect to X.
+    Deriv_rtx_fine,
+    /// Coarse partial derivative with respect to Y.
+    Deriv_rty_coarse,
+    /// Fine partial derivative with respect to Y.
+    Deriv_rty_fine,
+    /// Four-sample gather with comparison.
+    Gather4C,
+    /// Four-sample gather with programmable offset.
+    Gather4Po,
+    /// Four-sample gather with programmable offset and comparison.
+    Gather4PoC,
+    /// Reciprocal: `dest = 1.0 / src`.
+    Rcp,
+    /// Convert 32-bit float to 16-bit float (stored in low 16 bits).
+    F32tof16,
+    /// Convert 16-bit float (in low 16 bits) to 32-bit float.
+    F16tof32,
+    /// Unsigned integer add with carry out.
+    Uaddc,
+    /// Unsigned integer subtract with borrow out.
+    Usubb,
+    /// Count the number of set bits (population count).
+    Countbits,
+    /// Find first set bit from MSB (unsigned).
+    FirstbitHi,
+    /// Find first set bit from LSB.
+    FirstbitLo,
+    /// Find first set bit from MSB (signed / sign bit aware).
+    FirstbitShi,
+    /// Unsigned bitfield extract.
+    Ubfe,
+    /// Signed bitfield extract.
+    Ibfe,
+    /// Bitfield insert.
+    Bfi,
+    /// Reverse all bits.
+    Bfrev,
+    /// Conditional swap of two source pairs.
+    Swapc,
+    // DX11 SM5 declarations (143–162)
+    /// Declare a GS output stream.
+    DclStream,
+    /// Declare a function body for interface calls.
+    DclFunctionBody,
+    /// Declare a function table for interface dispatch.
+    DclFunctionTable,
+    /// Declare a class interface binding.
+    DclInterface,
+    /// Declare the HS input control-point count.
+    DclInputControlPointCount,
+    /// Declare the HS output control-point count.
+    DclOutputControlPointCount,
+    /// Declare the tessellation domain (tri, quad, isoline).
+    DclTessDomain,
+    /// Declare the tessellation partitioning mode.
+    DclTessPartitioning,
+    /// Declare the tessellation output primitive topology.
+    DclTessOutputPrimitive,
+    /// Declare the HS maximum tessellation factor.
+    DclHsMaxTessFactor,
+    /// Declare the HS fork-phase instance count.
+    DclHsForkPhaseInstanceCount,
+    /// Declare the HS join-phase instance count.
+    DclHsJoinPhaseInstanceCount,
+    /// Declare the compute shader thread group dimensions.
+    DclThreadGroup,
+    /// Declare a typed UAV binding.
+    DclUnorderedAccessViewTyped,
+    /// Declare a raw (byte-addressed) UAV.
+    DclUnorderedAccessViewRaw,
+    /// Declare a structured UAV.
+    DclUnorderedAccessViewStructured,
+    /// Declare raw thread-group shared memory.
+    DclThreadGroupSharedMemoryRaw,
+    /// Declare structured thread-group shared memory.
+    DclThreadGroupSharedMemoryStructured,
+    /// Declare a raw (byte-addressed) SRV.
+    DclResourceRaw,
+    /// Declare a structured SRV.
+    DclResourceStructured,
+    // DX11 SM5 UAV/structured ops (163–190)
+    /// Load from a typed UAV.
+    LdUavTyped,
+    /// Store to a typed UAV.
+    StoreUavTyped,
+    /// Load from a raw (byte-addressed) buffer.
+    LdRaw,
+    /// Store to a raw (byte-addressed) buffer.
+    StoreRaw,
+    /// Load from a structured buffer.
+    LdStructured,
+    /// Store to a structured buffer.
+    StoreStructured,
+    /// Atomic bitwise AND on a UAV/TGSM element.
+    AtomicAnd,
+    /// Atomic bitwise OR on a UAV/TGSM element.
+    AtomicOr,
+    /// Atomic bitwise XOR on a UAV/TGSM element.
+    AtomicXor,
+    /// Atomic compare-and-store on a UAV/TGSM element.
+    AtomicCmpStore,
+    /// Atomic signed integer add on a UAV/TGSM element.
+    AtomicIAdd,
+    /// Atomic signed integer max on a UAV/TGSM element.
+    AtomicIMax,
+    /// Atomic signed integer min on a UAV/TGSM element.
+    AtomicIMin,
+    /// Atomic unsigned integer max on a UAV/TGSM element.
+    AtomicUMax,
+    /// Atomic unsigned integer min on a UAV/TGSM element.
+    AtomicUMin,
+    /// Allocate from an append/consume UAV counter.
+    ImmAtomicAlloc,
+    /// Consume from an append/consume UAV counter.
+    ImmAtomicConsume,
+    /// Immediate atomic signed integer add (returns original value).
+    ImmAtomicIAdd,
+    /// Immediate atomic bitwise AND (returns original value).
+    ImmAtomicAnd,
+    /// Immediate atomic bitwise OR (returns original value).
+    ImmAtomicOr,
+    /// Immediate atomic bitwise XOR (returns original value).
+    ImmAtomicXor,
+    /// Immediate atomic exchange (returns original value).
+    ImmAtomicExch,
+    /// Immediate atomic compare-exchange (returns original value).
+    ImmAtomicCmpExch,
+    /// Immediate atomic signed integer max (returns original value).
+    ImmAtomicIMax,
+    /// Immediate atomic signed integer min (returns original value).
+    ImmAtomicIMin,
+    /// Immediate atomic unsigned integer max (returns original value).
+    ImmAtomicUMax,
+    /// Immediate atomic unsigned integer min (returns original value).
+    ImmAtomicUMin,
+    /// Thread group memory barrier / sync.
+    Sync,
+    // DX11 double-precision (191–202)
+    /// Double-precision add.
+    Dadd,
+    /// Double-precision maximum.
+    Dmax,
+    /// Double-precision minimum.
+    Dmin,
+    /// Double-precision multiply.
+    Dmul,
+    /// Double-precision equality comparison.
+    Deq,
+    /// Double-precision greater-or-equal comparison.
+    Dge,
+    /// Double-precision less-than comparison.
+    Dlt,
+    /// Double-precision not-equal comparison.
+    Dne,
+    /// Double-precision move.
+    Dmov,
+    /// Double-precision conditional move.
+    Dmovc,
+    /// Double to float conversion.
+    Dtof,
+    /// Float to double conversion.
+    Ftod,
+    // DX11 eval (203–206)
+    /// Evaluate an input attribute at a snapped pixel offset.
+    Eval_snapped,
+    /// Evaluate an input attribute at a specific sample index.
+    Eval_sampleIndex,
+    /// Evaluate an input attribute at the pixel centroid.
+    Eval_centroid,
+    /// Declare the GS instance count.
+    DclGsInstanceCount,
+    // DX11 misc (207–208)
+    /// Abort shader execution (debug).
+    Abort,
+    /// Trigger a debug breakpoint.
+    DebugBreak,
+    // DX11.1 (210–217)
+    /// Double-precision divide.
+    Ddiv,
+    /// Double-precision fused multiply-add.
+    Dfma,
+    /// Double-precision reciprocal.
+    Drcp,
+    /// Masked sum of absolute differences (MSAD).
+    Msad,
+    /// Double to signed integer conversion.
+    Dtoi,
+    /// Double to unsigned integer conversion.
+    Dtou,
+    /// Signed integer to double conversion.
+    Itod,
+    /// Unsigned integer to double conversion.
+    Utod,
+    /// Unknown or unrecognised opcode (preserved for forward compatibility).
+    Unknown(u32),
+}
+
+impl Opcode {
+    /// Converts a raw opcode value (bits 0–10 of the instruction token) to the
+    /// corresponding variant.
+    pub fn from_u32(v: u32) -> Self {
+        match v {
+            // D3D10 base opcodes (0-87)
+            0 => Self::Add,
+            1 => Self::And,
+            2 => Self::Break,
+            3 => Self::Breakc,
+            4 => Self::Call,
+            5 => Self::Callc,
+            6 => Self::Case,
+            7 => Self::Continue,
+            8 => Self::Continuec,
+            9 => Self::Cut,
+            10 => Self::Default,
+            11 => Self::Deriv_rtx,
+            12 => Self::Deriv_rty,
+            13 => Self::Discard,
+            14 => Self::Div,
+            15 => Self::Dp2,
+            16 => Self::Dp3,
+            17 => Self::Dp4,
+            18 => Self::Else,
+            19 => Self::Emit,
+            20 => Self::EmitThenCut,
+            21 => Self::EndIf,
+            22 => Self::EndLoop,
+            23 => Self::EndSwitch,
+            24 => Self::Eq,
+            25 => Self::Exp,
+            26 => Self::Frc,
+            27 => Self::Ftoi,
+            28 => Self::Ftou,
+            29 => Self::Ge,
+            30 => Self::Iadd,
+            31 => Self::If,
+            32 => Self::IEq,
+            33 => Self::IGe,
+            34 => Self::ILt,
+            35 => Self::IMad,
+            36 => Self::IMax,
+            37 => Self::IMin,
+            38 => Self::IMul,
+            39 => Self::INe,
+            40 => Self::INeg,
+            41 => Self::Ishl,
+            42 => Self::Ishr,
+            43 => Self::Itof,
+            44 => Self::Label,
+            45 => Self::Ld,
+            46 => Self::LdMs,
+            47 => Self::Log,
+            48 => Self::Loop,
+            49 => Self::Lt,
+            50 => Self::Mad,
+            51 => Self::Min,
+            52 => Self::Max,
+            53 => Self::CustomData,
+            54 => Self::Mov,
+            55 => Self::Movc,
+            56 => Self::Mul,
+            57 => Self::Ne,
+            58 => Self::Nop,
+            59 => Self::Not,
+            60 => Self::Or,
+            61 => Self::Resinfo,
+            62 => Self::Ret,
+            63 => Self::Retc,
+            64 => Self::Round_ne,
+            65 => Self::Round_ni,
+            66 => Self::Round_pi,
+            67 => Self::Round_z,
+            68 => Self::Rsq,
+            69 => Self::Sample,
+            70 => Self::SampleC,
+            71 => Self::SampleCLz,
+            72 => Self::SampleL,
+            73 => Self::SampleD,
+            74 => Self::SampleB,
+            75 => Self::Sqrt,
+            76 => Self::Switch,
+            77 => Self::Sincos,
+            78 => Self::UDiv,
+            79 => Self::ULt,
+            80 => Self::UGe,
+            81 => Self::UMul,
+            82 => Self::UMad,
+            83 => Self::UMax,
+            84 => Self::UMin,
+            85 => Self::Ushr,
+            86 => Self::Utof,
+            87 => Self::Xor,
+            // Declarations (88-106)
+            88 => Self::DclResource,
+            89 => Self::DclConstantBuffer,
+            90 => Self::DclSampler,
+            91 => Self::DclIndexRange,
+            92 => Self::DclGsOutputPrimitiveTopology,
+            93 => Self::DclGsInputPrimitive,
+            94 => Self::DclMaxOutputVertexCount,
+            95 => Self::DclInput,
+            96 => Self::DclInputSgv,
+            97 => Self::DclInputSiv,
+            98 => Self::DclInputPs,
+            99 => Self::DclInputPsSgv,
+            100 => Self::DclInputPsSiv,
+            101 => Self::DclOutput,
+            102 => Self::DclOutputSgv,
+            103 => Self::DclOutputSiv,
+            104 => Self::DclTemps,
+            105 => Self::DclIndexableTemp,
+            106 => Self::DclGlobalFlags,
+            // 107 = RESERVED0 (end of D3D10.0)
+            // DX10.1 (108-111)
+            108 => Self::Lod,
+            109 => Self::Gather4,
+            110 => Self::SamplePos,
+            111 => Self::SampleInfo,
+            // 112 = RESERVED1 (end of D3D10.1)
+            // DX11 Hull Shader phases (113-116)
+            113 => Self::HsDecls,
+            114 => Self::HsControlPointPhase,
+            115 => Self::HsForkPhase,
+            116 => Self::HsJoinPhase,
+            // DX11 Stream/Interface (117-120)
+            117 => Self::EmitStream,
+            118 => Self::CutStream,
+            119 => Self::EmitThenCutStream,
+            120 => Self::InterfaceCall,
+            // DX11 SM5 instructions (121-142)
+            121 => Self::BufInfo,
+            122 => Self::Deriv_rtx_coarse,
+            123 => Self::Deriv_rtx_fine,
+            124 => Self::Deriv_rty_coarse,
+            125 => Self::Deriv_rty_fine,
+            126 => Self::Gather4C,
+            127 => Self::Gather4Po,
+            128 => Self::Gather4PoC,
+            129 => Self::Rcp,
+            130 => Self::F32tof16,
+            131 => Self::F16tof32,
+            132 => Self::Uaddc,
+            133 => Self::Usubb,
+            134 => Self::Countbits,
+            135 => Self::FirstbitHi,
+            136 => Self::FirstbitLo,
+            137 => Self::FirstbitShi,
+            138 => Self::Ubfe,
+            139 => Self::Ibfe,
+            140 => Self::Bfi,
+            141 => Self::Bfrev,
+            142 => Self::Swapc,
+            // DX11 SM5 declarations (143-162)
+            143 => Self::DclStream,
+            144 => Self::DclFunctionBody,
+            145 => Self::DclFunctionTable,
+            146 => Self::DclInterface,
+            147 => Self::DclInputControlPointCount,
+            148 => Self::DclOutputControlPointCount,
+            149 => Self::DclTessDomain,
+            150 => Self::DclTessPartitioning,
+            151 => Self::DclTessOutputPrimitive,
+            152 => Self::DclHsMaxTessFactor,
+            153 => Self::DclHsForkPhaseInstanceCount,
+            154 => Self::DclHsJoinPhaseInstanceCount,
+            155 => Self::DclThreadGroup,
+            156 => Self::DclUnorderedAccessViewTyped,
+            157 => Self::DclUnorderedAccessViewRaw,
+            158 => Self::DclUnorderedAccessViewStructured,
+            159 => Self::DclThreadGroupSharedMemoryRaw,
+            160 => Self::DclThreadGroupSharedMemoryStructured,
+            161 => Self::DclResourceRaw,
+            162 => Self::DclResourceStructured,
+            // DX11 SM5 UAV/structured/atomic ops (163-190)
+            163 => Self::LdUavTyped,
+            164 => Self::StoreUavTyped,
+            165 => Self::LdRaw,
+            166 => Self::StoreRaw,
+            167 => Self::LdStructured,
+            168 => Self::StoreStructured,
+            169 => Self::AtomicAnd,
+            170 => Self::AtomicOr,
+            171 => Self::AtomicXor,
+            172 => Self::AtomicCmpStore,
+            173 => Self::AtomicIAdd,
+            174 => Self::AtomicIMax,
+            175 => Self::AtomicIMin,
+            176 => Self::AtomicUMax,
+            177 => Self::AtomicUMin,
+            178 => Self::ImmAtomicAlloc,
+            179 => Self::ImmAtomicConsume,
+            180 => Self::ImmAtomicIAdd,
+            181 => Self::ImmAtomicAnd,
+            182 => Self::ImmAtomicOr,
+            183 => Self::ImmAtomicXor,
+            184 => Self::ImmAtomicExch,
+            185 => Self::ImmAtomicCmpExch,
+            186 => Self::ImmAtomicIMax,
+            187 => Self::ImmAtomicIMin,
+            188 => Self::ImmAtomicUMax,
+            189 => Self::ImmAtomicUMin,
+            190 => Self::Sync,
+            // DX11 double-precision (191-202)
+            191 => Self::Dadd,
+            192 => Self::Dmax,
+            193 => Self::Dmin,
+            194 => Self::Dmul,
+            195 => Self::Deq,
+            196 => Self::Dge,
+            197 => Self::Dlt,
+            198 => Self::Dne,
+            199 => Self::Dmov,
+            200 => Self::Dmovc,
+            201 => Self::Dtof,
+            202 => Self::Ftod,
+            // DX11 eval + misc (203-208)
+            203 => Self::Eval_snapped,
+            204 => Self::Eval_sampleIndex,
+            205 => Self::Eval_centroid,
+            206 => Self::DclGsInstanceCount,
+            207 => Self::Abort,
+            208 => Self::DebugBreak,
+            // 209 = RESERVED0 (end of D3D11.0)
+            // DX11.1 (210-217)
+            210 => Self::Ddiv,
+            211 => Self::Dfma,
+            212 => Self::Drcp,
+            213 => Self::Msad,
+            214 => Self::Dtoi,
+            215 => Self::Dtou,
+            216 => Self::Itod,
+            217 => Self::Utod,
+            _ => Self::Unknown(v),
+        }
+    }
+
+    /// Converts the opcode back to its raw `u32` value.
+    pub fn to_u32(&self) -> u32 {
+        match self {
+            Self::Add => 0,
+            Self::And => 1,
+            Self::Break => 2,
+            Self::Breakc => 3,
+            Self::Call => 4,
+            Self::Callc => 5,
+            Self::Case => 6,
+            Self::Continue => 7,
+            Self::Continuec => 8,
+            Self::Cut => 9,
+            Self::Default => 10,
+            Self::Deriv_rtx => 11,
+            Self::Deriv_rty => 12,
+            Self::Discard => 13,
+            Self::Div => 14,
+            Self::Dp2 => 15,
+            Self::Dp3 => 16,
+            Self::Dp4 => 17,
+            Self::Else => 18,
+            Self::Emit => 19,
+            Self::EmitThenCut => 20,
+            Self::EndIf => 21,
+            Self::EndLoop => 22,
+            Self::EndSwitch => 23,
+            Self::Eq => 24,
+            Self::Exp => 25,
+            Self::Frc => 26,
+            Self::Ftoi => 27,
+            Self::Ftou => 28,
+            Self::Ge => 29,
+            Self::Iadd => 30,
+            Self::If => 31,
+            Self::IEq => 32,
+            Self::IGe => 33,
+            Self::ILt => 34,
+            Self::IMad => 35,
+            Self::IMax => 36,
+            Self::IMin => 37,
+            Self::IMul => 38,
+            Self::INe => 39,
+            Self::INeg => 40,
+            Self::Ishl => 41,
+            Self::Ishr => 42,
+            Self::Itof => 43,
+            Self::Label => 44,
+            Self::Ld => 45,
+            Self::LdMs => 46,
+            Self::Log => 47,
+            Self::Loop => 48,
+            Self::Lt => 49,
+            Self::Mad => 50,
+            Self::Min => 51,
+            Self::Max => 52,
+            Self::CustomData => 53,
+            Self::Mov => 54,
+            Self::Movc => 55,
+            Self::Mul => 56,
+            Self::Ne => 57,
+            Self::Nop => 58,
+            Self::Not => 59,
+            Self::Or => 60,
+            Self::Resinfo => 61,
+            Self::Ret => 62,
+            Self::Retc => 63,
+            Self::Round_ne => 64,
+            Self::Round_ni => 65,
+            Self::Round_pi => 66,
+            Self::Round_z => 67,
+            Self::Rsq => 68,
+            Self::Sample => 69,
+            Self::SampleC => 70,
+            Self::SampleCLz => 71,
+            Self::SampleL => 72,
+            Self::SampleD => 73,
+            Self::SampleB => 74,
+            Self::Sqrt => 75,
+            Self::Switch => 76,
+            Self::Sincos => 77,
+            Self::UDiv => 78,
+            Self::ULt => 79,
+            Self::UGe => 80,
+            Self::UMul => 81,
+            Self::UMad => 82,
+            Self::UMax => 83,
+            Self::UMin => 84,
+            Self::Ushr => 85,
+            Self::Utof => 86,
+            Self::Xor => 87,
+            Self::DclResource => 88,
+            Self::DclConstantBuffer => 89,
+            Self::DclSampler => 90,
+            Self::DclIndexRange => 91,
+            Self::DclGsOutputPrimitiveTopology => 92,
+            Self::DclGsInputPrimitive => 93,
+            Self::DclMaxOutputVertexCount => 94,
+            Self::DclInput => 95,
+            Self::DclInputSgv => 96,
+            Self::DclInputSiv => 97,
+            Self::DclInputPs => 98,
+            Self::DclInputPsSgv => 99,
+            Self::DclInputPsSiv => 100,
+            Self::DclOutput => 101,
+            Self::DclOutputSgv => 102,
+            Self::DclOutputSiv => 103,
+            Self::DclTemps => 104,
+            Self::DclIndexableTemp => 105,
+            Self::DclGlobalFlags => 106,
+            Self::Lod => 108,
+            Self::Gather4 => 109,
+            Self::SamplePos => 110,
+            Self::SampleInfo => 111,
+            Self::HsDecls => 113,
+            Self::HsControlPointPhase => 114,
+            Self::HsForkPhase => 115,
+            Self::HsJoinPhase => 116,
+            Self::EmitStream => 117,
+            Self::CutStream => 118,
+            Self::EmitThenCutStream => 119,
+            Self::InterfaceCall => 120,
+            Self::BufInfo => 121,
+            Self::Deriv_rtx_coarse => 122,
+            Self::Deriv_rtx_fine => 123,
+            Self::Deriv_rty_coarse => 124,
+            Self::Deriv_rty_fine => 125,
+            Self::Gather4C => 126,
+            Self::Gather4Po => 127,
+            Self::Gather4PoC => 128,
+            Self::Rcp => 129,
+            Self::F32tof16 => 130,
+            Self::F16tof32 => 131,
+            Self::Uaddc => 132,
+            Self::Usubb => 133,
+            Self::Countbits => 134,
+            Self::FirstbitHi => 135,
+            Self::FirstbitLo => 136,
+            Self::FirstbitShi => 137,
+            Self::Ubfe => 138,
+            Self::Ibfe => 139,
+            Self::Bfi => 140,
+            Self::Bfrev => 141,
+            Self::Swapc => 142,
+            Self::DclStream => 143,
+            Self::DclFunctionBody => 144,
+            Self::DclFunctionTable => 145,
+            Self::DclInterface => 146,
+            Self::DclInputControlPointCount => 147,
+            Self::DclOutputControlPointCount => 148,
+            Self::DclTessDomain => 149,
+            Self::DclTessPartitioning => 150,
+            Self::DclTessOutputPrimitive => 151,
+            Self::DclHsMaxTessFactor => 152,
+            Self::DclHsForkPhaseInstanceCount => 153,
+            Self::DclHsJoinPhaseInstanceCount => 154,
+            Self::DclThreadGroup => 155,
+            Self::DclUnorderedAccessViewTyped => 156,
+            Self::DclUnorderedAccessViewRaw => 157,
+            Self::DclUnorderedAccessViewStructured => 158,
+            Self::DclThreadGroupSharedMemoryRaw => 159,
+            Self::DclThreadGroupSharedMemoryStructured => 160,
+            Self::DclResourceRaw => 161,
+            Self::DclResourceStructured => 162,
+            Self::LdUavTyped => 163,
+            Self::StoreUavTyped => 164,
+            Self::LdRaw => 165,
+            Self::StoreRaw => 166,
+            Self::LdStructured => 167,
+            Self::StoreStructured => 168,
+            Self::AtomicAnd => 169,
+            Self::AtomicOr => 170,
+            Self::AtomicXor => 171,
+            Self::AtomicCmpStore => 172,
+            Self::AtomicIAdd => 173,
+            Self::AtomicIMax => 174,
+            Self::AtomicIMin => 175,
+            Self::AtomicUMax => 176,
+            Self::AtomicUMin => 177,
+            Self::ImmAtomicAlloc => 178,
+            Self::ImmAtomicConsume => 179,
+            Self::ImmAtomicIAdd => 180,
+            Self::ImmAtomicAnd => 181,
+            Self::ImmAtomicOr => 182,
+            Self::ImmAtomicXor => 183,
+            Self::ImmAtomicExch => 184,
+            Self::ImmAtomicCmpExch => 185,
+            Self::ImmAtomicIMax => 186,
+            Self::ImmAtomicIMin => 187,
+            Self::ImmAtomicUMax => 188,
+            Self::ImmAtomicUMin => 189,
+            Self::Sync => 190,
+            Self::Dadd => 191,
+            Self::Dmax => 192,
+            Self::Dmin => 193,
+            Self::Dmul => 194,
+            Self::Deq => 195,
+            Self::Dge => 196,
+            Self::Dlt => 197,
+            Self::Dne => 198,
+            Self::Dmov => 199,
+            Self::Dmovc => 200,
+            Self::Dtof => 201,
+            Self::Ftod => 202,
+            Self::Eval_snapped => 203,
+            Self::Eval_sampleIndex => 204,
+            Self::Eval_centroid => 205,
+            Self::DclGsInstanceCount => 206,
+            Self::Abort => 207,
+            Self::DebugBreak => 208,
+            Self::Ddiv => 210,
+            Self::Dfma => 211,
+            Self::Drcp => 212,
+            Self::Msad => 213,
+            Self::Dtoi => 214,
+            Self::Dtou => 215,
+            Self::Itod => 216,
+            Self::Utod => 217,
+            Self::Unknown(v) => *v,
+        }
+    }
+
+    /// Returns the lowercase mnemonic used in disassembly output.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Add => "add",
+            Self::And => "and",
+            Self::Break => "break",
+            Self::Breakc => "breakc",
+            Self::Call => "call",
+            Self::Callc => "callc",
+            Self::Case => "case",
+            Self::Continue => "continue",
+            Self::Continuec => "continuec",
+            Self::Cut => "cut",
+            Self::Default => "default",
+            Self::Deriv_rtx => "deriv_rtx",
+            Self::Deriv_rty => "deriv_rty",
+            Self::Discard => "discard",
+            Self::Div => "div",
+            Self::Dp2 => "dp2",
+            Self::Dp3 => "dp3",
+            Self::Dp4 => "dp4",
+            Self::Else => "else",
+            Self::Emit => "emit",
+            Self::EmitThenCut => "emit_then_cut",
+            Self::EmitStream => "emit_stream",
+            Self::CutStream => "cut_stream",
+            Self::EmitThenCutStream => "emit_then_cut_stream",
+            Self::InterfaceCall => "interface_call",
+            Self::EndIf => "endif",
+            Self::EndLoop => "endloop",
+            Self::EndSwitch => "endswitch",
+            Self::Eq => "eq",
+            Self::Exp => "exp",
+            Self::Frc => "frc",
+            Self::Ftoi => "ftoi",
+            Self::Ftou => "ftou",
+            Self::Ge => "ge",
+            Self::Iadd => "iadd",
+            Self::If => "if",
+            Self::IEq => "ieq",
+            Self::IGe => "ige",
+            Self::ILt => "ilt",
+            Self::IMad => "imad",
+            Self::IMax => "imax",
+            Self::IMin => "imin",
+            Self::IMul => "imul",
+            Self::INe => "ine",
+            Self::INeg => "ineg",
+            Self::Ishl => "ishl",
+            Self::Ishr => "ishr",
+            Self::Itof => "itof",
+            Self::Label => "label",
+            Self::Ld => "ld",
+            Self::LdMs => "ld_ms",
+            Self::Log => "log",
+            Self::Loop => "loop",
+            Self::Lt => "lt",
+            Self::Mad => "mad",
+            Self::Min => "min",
+            Self::Max => "max",
+            Self::CustomData => "customdata",
+            Self::Mov => "mov",
+            Self::Movc => "movc",
+            Self::Mul => "mul",
+            Self::Ne => "ne",
+            Self::Nop => "nop",
+            Self::Not => "not",
+            Self::Or => "or",
+            Self::Resinfo => "resinfo",
+            Self::Ret => "ret",
+            Self::Retc => "retc",
+            Self::Round_ne => "round_ne",
+            Self::Round_ni => "round_ni",
+            Self::Round_pi => "round_pi",
+            Self::Round_z => "round_z",
+            Self::Rsq => "rsq",
+            Self::Sample => "sample",
+            Self::SampleC => "sample_c",
+            Self::SampleCLz => "sample_c_lz",
+            Self::SampleL => "sample_l",
+            Self::SampleD => "sample_d",
+            Self::SampleB => "sample_b",
+            Self::Sqrt => "sqrt",
+            Self::Switch => "switch",
+            Self::Sincos => "sincos",
+            Self::UDiv => "udiv",
+            Self::ULt => "ult",
+            Self::UGe => "uge",
+            Self::UMul => "umul",
+            Self::UMad => "umad",
+            Self::UMax => "umax",
+            Self::UMin => "umin",
+            Self::Ushr => "ushr",
+            Self::Utof => "utof",
+            Self::Xor => "xor",
+            // Declarations
+            Self::DclGlobalFlags => "dcl_globalFlags",
+            Self::DclInput => "dcl_input",
+            Self::DclInputSgv => "dcl_input_sgv",
+            Self::DclInputSiv => "dcl_input_siv",
+            Self::DclInputPs => "dcl_input_ps",
+            Self::DclInputPsSgv => "dcl_input_ps_sgv",
+            Self::DclInputPsSiv => "dcl_input_ps_siv",
+            Self::DclOutput => "dcl_output",
+            Self::DclOutputSgv => "dcl_output_sgv",
+            Self::DclOutputSiv => "dcl_output_siv",
+            Self::DclResource => "dcl_resource",
+            Self::DclSampler => "dcl_sampler",
+            Self::DclConstantBuffer => "dcl_constantbuffer",
+            Self::DclTemps => "dcl_temps",
+            Self::DclIndexableTemp => "dcl_indexableTemp",
+            Self::DclIndexRange => "dcl_indexRange",
+            Self::DclGsInputPrimitive => "dcl_inputPrimitive",
+            Self::DclGsOutputPrimitiveTopology => "dcl_outputTopology",
+            Self::DclMaxOutputVertexCount => "dcl_maxOutputVertexCount",
+            Self::DclGsInstanceCount => "dcl_gsInstanceCount",
+            Self::DclOutputControlPointCount => "dcl_outputControlPointCount",
+            Self::DclInputControlPointCount => "dcl_inputControlPointCount",
+            Self::DclTessDomain => "dcl_tessDomain",
+            Self::DclTessPartitioning => "dcl_tessPartitioning",
+            Self::DclTessOutputPrimitive => "dcl_tessOutputPrimitive",
+            Self::DclHsMaxTessFactor => "dcl_hsMaxTessFactor",
+            Self::DclHsForkPhaseInstanceCount => "dcl_hsForkPhaseInstanceCount",
+            Self::DclHsJoinPhaseInstanceCount => "dcl_hsJoinPhaseInstanceCount",
+            Self::HsDecls => "hs_decls",
+            Self::HsControlPointPhase => "hs_control_point_phase",
+            Self::HsForkPhase => "hs_fork_phase",
+            Self::HsJoinPhase => "hs_join_phase",
+            Self::DclStream => "dcl_stream",
+            Self::DclResourceStructured => "dcl_resource_structured",
+            Self::DclResourceRaw => "dcl_resource_raw",
+            Self::DclUnorderedAccessViewTyped => "dcl_uav_typed",
+            Self::DclUnorderedAccessViewRaw => "dcl_uav_raw",
+            Self::DclUnorderedAccessViewStructured => "dcl_uav_structured",
+            Self::DclThreadGroup => "dcl_thread_group",
+            Self::DclThreadGroupSharedMemoryRaw => "dcl_tgsm_raw",
+            Self::DclThreadGroupSharedMemoryStructured => "dcl_tgsm_structured",
+            Self::Sync => "sync",
+            Self::DclFunctionBody => "dcl_function_body",
+            Self::DclFunctionTable => "dcl_function_table",
+            Self::DclInterface => "dcl_interface",
+            Self::BufInfo => "bufinfo",
+            Self::LdStructured => "ld_structured",
+            Self::StoreStructured => "store_structured",
+            Self::LdRaw => "ld_raw",
+            Self::StoreRaw => "store_raw",
+            Self::LdUavTyped => "ld_uav_typed",
+            Self::StoreUavTyped => "store_uav_typed",
+            Self::AtomicAnd => "atomic_and",
+            Self::AtomicOr => "atomic_or",
+            Self::AtomicXor => "atomic_xor",
+            Self::AtomicCmpStore => "atomic_cmp_store",
+            Self::AtomicIAdd => "atomic_iadd",
+            Self::AtomicIMax => "atomic_imax",
+            Self::AtomicIMin => "atomic_imin",
+            Self::AtomicUMax => "atomic_umax",
+            Self::AtomicUMin => "atomic_umin",
+            Self::ImmAtomicAlloc => "imm_atomic_alloc",
+            Self::ImmAtomicConsume => "imm_atomic_consume",
+            Self::ImmAtomicIAdd => "imm_atomic_iadd",
+            Self::ImmAtomicAnd => "imm_atomic_and",
+            Self::ImmAtomicOr => "imm_atomic_or",
+            Self::ImmAtomicXor => "imm_atomic_xor",
+            Self::ImmAtomicExch => "imm_atomic_exch",
+            Self::ImmAtomicCmpExch => "imm_atomic_cmp_exch",
+            Self::ImmAtomicIMax => "imm_atomic_imax",
+            Self::ImmAtomicIMin => "imm_atomic_imin",
+            Self::ImmAtomicUMax => "imm_atomic_umax",
+            Self::ImmAtomicUMin => "imm_atomic_umin",
+            Self::Eval_snapped => "eval_snapped",
+            Self::Eval_sampleIndex => "eval_sample_index",
+            Self::Eval_centroid => "eval_centroid",
+            Self::Swapc => "swapc",
+            Self::Uaddc => "uaddc",
+            Self::Usubb => "usubb",
+            Self::Countbits => "countbits",
+            Self::FirstbitHi => "firstbit_hi",
+            Self::FirstbitLo => "firstbit_lo",
+            Self::FirstbitShi => "firstbit_shi",
+            Self::Ubfe => "ubfe",
+            Self::Ibfe => "ibfe",
+            Self::Bfi => "bfi",
+            Self::Bfrev => "bfrev",
+            Self::F16tof32 => "f16tof32",
+            Self::F32tof16 => "f32tof16",
+            Self::Rcp => "rcp",
+            Self::Deriv_rtx_coarse => "deriv_rtx_coarse",
+            Self::Deriv_rtx_fine => "deriv_rtx_fine",
+            Self::Deriv_rty_coarse => "deriv_rty_coarse",
+            Self::Deriv_rty_fine => "deriv_rty_fine",
+            Self::Gather4 => "gather4",
+            Self::Gather4C => "gather4_c",
+            Self::Gather4Po => "gather4_po",
+            Self::Gather4PoC => "gather4_po_c",
+            Self::Lod => "lod",
+            Self::SamplePos => "sample_pos",
+            Self::SampleInfo => "sample_info",
+            // Double precision
+            Self::Dadd => "dadd",
+            Self::Dmax => "dmax",
+            Self::Dmin => "dmin",
+            Self::Dmul => "dmul",
+            Self::Deq => "deq",
+            Self::Dge => "dge",
+            Self::Dlt => "dlt",
+            Self::Dne => "dne",
+            Self::Dmov => "dmov",
+            Self::Dmovc => "dmovc",
+            Self::Dtof => "dtof",
+            Self::Ftod => "ftod",
+            // DX11.1
+            Self::Ddiv => "ddiv",
+            Self::Dfma => "dfma",
+            Self::Drcp => "drcp",
+            Self::Msad => "msad",
+            Self::Dtoi => "dtoi",
+            Self::Dtou => "dtou",
+            Self::Itod => "itod",
+            Self::Utod => "utod",
+            // Misc
+            Self::Abort => "abort",
+            Self::DebugBreak => "debug_break",
+            Self::Unknown(v) => {
+                let _ = v;
+                "unknown_op"
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Opcode;
+
+    /// Verify every opcode value 0..=217 maps to a known variant (not Unknown).
+    #[test]
+    fn all_opcodes_are_known() {
+        for v in 0..=217u32 {
+            // Skip reserved slots
+            if v == 107 || v == 112 || v == 209 {
+                assert!(
+                    matches!(Opcode::from_u32(v), Opcode::Unknown(_)),
+                    "reserved opcode {v} should map to Unknown"
+                );
+                continue;
+            }
+            let op = Opcode::from_u32(v);
+            assert!(
+                !matches!(op, Opcode::Unknown(_)),
+                "opcode {v} mapped to Unknown, expected a known variant"
+            );
+        }
+    }
+
+    /// Verify every known opcode has a non-empty, non-"unknown_op" name.
+    #[test]
+    fn all_opcodes_have_names() {
+        for v in 0..=217u32 {
+            if v == 107 || v == 112 || v == 209 {
+                continue;
+            }
+            let op = Opcode::from_u32(v);
+            let name = op.name();
+            assert!(
+                !name.is_empty() && name != "unknown_op",
+                "opcode {v} ({op:?}) has bad name: {name:?}"
+            );
+        }
+    }
+
+    /// Spot-check key opcode values against their expected names.
+    #[test]
+    fn opcode_spot_checks() {
+        let cases: &[(u32, &str)] = &[
+            (0, "add"),
+            (1, "and"),
+            (14, "div"),
+            (31, "if"),
+            (48, "loop"),
+            (54, "mov"),
+            (62, "ret"),
+            (69, "sample"),
+            (87, "xor"),
+            // Declarations
+            (88, "dcl_resource"),
+            (89, "dcl_constantbuffer"),
+            (104, "dcl_temps"),
+            (106, "dcl_globalFlags"),
+            // DX10.1
+            (108, "lod"),
+            (109, "gather4"),
+            // DX11 HS
+            (113, "hs_decls"),
+            (117, "emit_stream"),
+            (118, "cut_stream"),
+            // SM5
+            (121, "bufinfo"),
+            (129, "rcp"),
+            (134, "countbits"),
+            (143, "dcl_stream"),
+            (155, "dcl_thread_group"),
+            (163, "ld_uav_typed"),
+            (190, "sync"),
+            // Double precision
+            (191, "dadd"),
+            (202, "ftod"),
+            // Eval
+            (203, "eval_snapped"),
+            (206, "dcl_gsInstanceCount"),
+            // DX11.1
+            (210, "ddiv"),
+            (217, "utod"),
+        ];
+        for &(v, expected) in cases {
+            let op = Opcode::from_u32(v);
+            assert_eq!(op.name(), expected, "opcode {v} ({op:?})");
+        }
+    }
+
+    /// Values beyond 217 should map to Unknown.
+    #[test]
+    fn unknown_opcodes() {
+        for v in [218, 255, 500, 1000, u32::MAX] {
+            assert!(
+                matches!(Opcode::from_u32(v), Opcode::Unknown(_)),
+                "opcode {v} should be Unknown"
+            );
+            assert_eq!(Opcode::from_u32(v).name(), "unknown_op");
+        }
+    }
+}
