@@ -6,8 +6,9 @@
 
 FF14 EXDViewer edit 是一个使用 **Rust + egui** 构建的桌面应用程序，帮助 FF14 玩家与数据挖掘爱好者快速浏览游戏内部数据表，提供了原生 EXDViewer 没有的增强能力：
 
+* **五大页面**：数据列表、图标列表、地图列表、音乐列表、资源列表，覆盖数据表、图标、地图、音频与游戏资源文件的一站式浏览。
 * **数据版本对比（Diff）**：对比两个游戏版本导出 CSV 的数据差异，精确到行与单元格，并支持图标渲染。
-* **版本追踪**：自动记录各游戏版本的数据表/音乐列表，一键筛选"仅显示新增项"。
+* **版本追踪**：自动记录各游戏版本的数据表/地图/音乐列表，一键筛选"仅显示新增项"；小型修复版本数据未变时自动回溯对比更早版本，旧版本列表文件归档到 `config/bak/`。
 * **游戏音乐**：支持导出音乐，并使用HCA 解码工具将游戏中部分.hca格式加密音乐导出为.wav格式。
 * **下载依赖**：提供从 GitHub 下载 EXDSchema 与 HCADecoder 工具的功能，并存放到程序目录下tools文件夹内；由于EXDSchema文件众多，程序提供的下载功能需要按文件依次下载，容易中途下载失败，推荐使用git clone --recurse-submodules https://github.com/xivdev/EXDSchema.git或zip包下载方式手动下载。
 
@@ -31,8 +32,9 @@ FF14 EXDViewer edit 是一个使用 **Rust + egui** 构建的桌面应用程序�
 
 ### 3\. 仅显示新增项
 
-* 数据表页面与音乐页面均提供「仅显示新增项」开关（🔍）。
-* 程序会自动记录最近两个游戏版本的表单/音乐列表，对比后标记新增内容。
+* 数据表、地图、音乐页面均提供「仅显示新增项」开关（🔍）。
+* 程序会自动记录各游戏版本的列表文件；若最近两个版本数据无变化（小型修复版本），会自动回溯对比更早版本，直到找到有变动的版本，标记新增内容。
+* 除当前版本与对比有变动版本外的旧列表文件会归档到 `config/bak/{map_list,music_list,sheet_list}/`，不再直接删除。
 
 ### 4\. 音频导出与 HCA 转码
 
@@ -40,7 +42,29 @@ FF14 EXDViewer edit 是一个使用 **Rust + egui** 构建的桌面应用程序�
 * hca加密格式音频在导出后程序会自动调用 `tools/hca.exe` 在相同目录生成 `.wav` 文件。
 * 若 `tools/hca.exe` 不存在则不会进行hca音频解码，不影响程序导出功能，可通过「下载」菜单的「HCADecoder」进行下载或手动下载并放到程序tools文件夹内。
 
-### 5\. 下载功能
+### 5\. 地图列表
+
+* 左侧可折叠列表展示全部地图（支持筛选、仅显示新增项、折叠/恢复按钮）。
+* 右侧预览区显示地图名称（含二级地名）、基本信息（编号/类型/资料片/限制职能/等级/装等/允许解限等）与地图图片（自动裁剪透明边缘，统一高度展示）。
+* 信息中的类型/资料片/限制职能等链接列自动解析引用表名称，并缓存到 `config/map_links_{版本号}.json`（版本变动才重新读取）。
+* 保存单张地图图片弹出文件选择器（默认 `export/map/`），保存全部自动保存并带进度窗口。
+* 地图图片命名：`[短编号] - [地名] - [二级地名].png`。
+
+### 6\. 图标列表
+
+* 分类浏览全部游戏图标：全部图标 / 本地化专属图标 / 其他图标，支持搜索分类。
+* 图标以统一 40×40 网格展示（点击 +/- 可调整缩放档），点击图标可打开大图预览（支持缩放）。
+* 「点击加载反向引用」可读取所有引用该图标的表与行号。
+* 大图右键菜单支持复制原始值 / 复制图片 / 保存图片。
+
+### 7\. 资源列表
+
+* 浏览游戏安装目录内的全部资源文件（模型/材质/着色器/特效/音频/UI 布局等）。
+* 搜索支持模糊（Fuzzy）、正则（Regex）、包含（Contains）三种模式，可按扩展名筛选。
+* 点击文件后自动识别格式并提供对应查看器：3D 模型、纹理、着色器代码、动画等；无法识别时提供原始字节查看。
+* 支持复制文件路径 / crc32 / 索引哈希，查看文件依赖关系。
+
+### 8\. 下载功能
 
 主菜单栏的「下载」菜单提供：
 
@@ -52,7 +76,7 @@ FF14 EXDViewer edit 是一个使用 **Rust + egui** 构建的桌面应用程序�
 * 下载 URL 保存在 `config/settings.json` 中（字段 `exdschema\_url` / `hca\_url`），可手动修改；未配置时使用代码内置默认值。
 * 下载在后台线程执行，窗口显示进度与结果。
 
-### 6\. 日志与配置
+### 9\. 日志与配置
 
 * 「视图设置」菜单可打开 Log 日志窗口，支持等级过滤（ERROR/WARN/INFO/DEBUG）、正则搜索、复制日志。
 * 所有配置文件均存放于 exe 同目录下的 `config/` 文件夹（JSON 格式）。
@@ -66,6 +90,12 @@ FF14\_EXDViewer\_edit/
 ├── deps/                   # 本地依赖（ironworks 等）
 ├── tools/
 │   └── hca.exe             # HCA 音频解码工具（下载后获得）
+├── deps/                   # 本地依赖（ironworks、d3dasm 等）
+├── glyphnames/             # 字形名列表 crate（资源查看用）
+├── luadec/                 # Lua 字节码反编译 crate（资源查看用）
+├── pathlist/               # FFXIV 路径列表编码 crate
+├── shaders/                # 着色器名列表 crate
+├── shadermerge/            # 着色器合并 crate（shpk 查看用）
 ├── viewer/                 # 桌面客户端主程序
 │   ├── Cargo.toml          # viewer crate 配置（包名 ff14-exdviewer-edit）
 │   └── src/
@@ -75,13 +105,17 @@ FF14\_EXDViewer\_edit/
 │       ├── backend.rs      # 后端数据提供者（游戏版本等）
 │       ├── downloader.rs   # EXDSchema / HCADecoder 下载模块
 │       ├── diff.rs         # 版本对比模块（CSV 解析、差异计算、表格渲染）
-│       ├── list\_tracker.rs # 版本化列表存储与新增项对比
+│       ├── list\_tracker.rs # 版本化列表存储与新增项对比/归档
+│       ├── map.rs          # 地图列表（左侧列表 + 右侧预览 + 图片保存）
 │       ├── music.rs        # 音乐播放器（含新增项筛选）
+│       ├── icons/          # 图标列表（分类、网格、反向引用）
+│       ├── assets/         # 资源列表（搜索、文件树、3D 查看器）
 │       ├── sheet/          # 数据表渲染（表格、单元格、图标）
 │       ├── excel/          # 游戏数据访问（SqPack 解析）
+│       ├── goto.rs         # 跳转窗口（含 Palette 调色板/列表导航）
 │       ├── settings.rs     # 设置项与配置文件结构
 │       ├── config\_file.rs  # settings.json 读写
-│       └── utils/          # 图标管理、Promise 工具等
+│       └── utils/          # 图标管理、Promise 工具、纹理解码等
 └── README.md               # 本文件
 ```
 
@@ -105,7 +139,7 @@ FF14\_EXDViewer\_edit/
 
 |项目|地址|用途|
 |-|-|-|
-|EXDViewer|https://github.com/WorkingRobot/EXDViewer|本项目的基础（V1.7.0 版本）|
+|EXDViewer|https://github.com/WorkingRobot/EXDViewer|本项目的基础（V1.7.0 版本；图标/资源页面移植自 V1.9.0）|
 |EXDSchema|https://github.com/xivdev/EXDSchema|数据结构定义（YAML），支持动态编辑|
 |ironworks|https://github.com/ackwell/ironworks|Rust 游戏数据解析库|
 |Lumina|https://github.com/NotAdam/Lumina|C# 游戏数据解析库（社区参考）|
@@ -116,6 +150,10 @@ FF14\_EXDViewer\_edit/
 |工具|来源|用途|
 |-|-|-|
 |HCADecoder|https://github.com/Nyagamon/HCADecoder|HCA → WAV 音频解码|
+
+## 版本
+
+当前版本：**1.9.1**（工作区 `Cargo.toml` 中 `version` 字段）。
 
 ## 从源码构建
 
