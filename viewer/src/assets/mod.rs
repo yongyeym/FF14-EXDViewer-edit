@@ -1183,7 +1183,7 @@ impl AssetBrowser {
                             Vec2::new(ui.available_width(), 0.0),
                             TextEdit::singleline(&mut self.search)
                                 .id(egui::Id::new(SEARCH_ID))
-                                .hint_text("Search paths"),
+                                .hint_text("搜索路径"),
                         )
                         .on_hover_text(
                             "输入 ext:stm 匹配扩展名，或包含 / 以模糊匹配路径",

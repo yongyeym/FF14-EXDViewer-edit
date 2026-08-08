@@ -430,7 +430,7 @@ impl IconBrowser {
                         ui.add_space(8.0);
                         if query.is_empty()
                             && ui
-                                .button("加载反向引用")
+                                .button("点击加载反向引用")
                                 .on_hover_text(
                                     "读取所有引用图标的表，以便列出使用它的行。数据量达数十 MB。",
                                 )
@@ -442,7 +442,7 @@ impl IconBrowser {
                             select(
                                 ui,
                                 Category::Localized,
-                                format!("Language icons ({})", thousands(localized)),
+                                format!("本地化专属图标（{}）", thousands(localized)),
                             );
                         }
                     }
@@ -471,7 +471,7 @@ impl IconBrowser {
                     ui.label(if capped < self.shown.len() {
                         format!("{} 个图标，滚动查看更多", thousands(capped))
                     } else {
-                        format!("{} icons", thousands(self.shown.len()))
+                        format!("{} 个图标", thousands(self.shown.len()))
                     });
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if CollapsibleSidePanel::is_collapsed(ui.ctx(), "icon_info") {
