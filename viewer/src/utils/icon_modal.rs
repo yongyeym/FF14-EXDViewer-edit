@@ -37,8 +37,9 @@ pub fn icon_modal(ctx: &Context, icon_id: u32, icon: ManagedIcon) -> bool {
 
 /// 预览显示尺寸：小图按原始分辨率；大图等比缩放到最大尺寸内。
 fn preview_size(ctx: &Context, source: &ImageSource<'static>) -> egui::Vec2 {
-    // 最大尺寸：程序主窗口分辨率的 80%
-    let max_preview = ctx.viewport_rect().size() * 0.8;
+    // 最大尺寸：程序主窗口分辨率的 80%，但不超过绝对上限，
+    // 避免在最大化/大屏窗口下弹窗几乎全屏而完全遮挡右侧预览面板
+    let max_preview = (ctx.viewport_rect().size() * 0.8).min(egui::vec2(1600.0, 900.0));
     let natural = match source {
         ImageSource::Texture(texture) => {
             Some(egui::vec2(texture.size.x as f32, texture.size.y as f32))
