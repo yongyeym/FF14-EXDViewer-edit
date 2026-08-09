@@ -2204,6 +2204,10 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
             match action {
                 icons::Action::Select(icon_id) => self.navigate(format!("/icons/{icon_id}")),
                 icons::Action::Navigate(route) => self.navigate(route),
+                icons::Action::Save(icon_id) => {
+                    let hires = ALWAYS_HIRES.get(ui.ctx());
+                    self.command_save_icon_detail(backend.clone(), icon_id, hires);
+                }
             }
         }
     }
@@ -2820,6 +2824,47 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
         }));
     }
 
+
+    /// 保存图标列表预览区的单个图标：rfd 文件选择器，默认 export/img/ + ui_{icon_id}.png
+    fn command_save_icon_detail(&mut self, backend: Backend, icon_id: u32, hires: bool) {
+        let export_dir = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|p| p.join("export").join("img")))
+            .unwrap_or_else(|| std::path::PathBuf::from("export/img"));
+        let _ = std::fs::create_dir_all(&export_dir);
+
+        let excel = backend.excel().clone();
+        self.export_promise = Some(TrackedPromise::spawn_local(async move {
+            match excel.get_icon(icon_id, hires).await {
+                Ok(either::Either::Right(image)) => {
+                    let mut buf = std::io::Cursor::new(Vec::new());
+                    if image.write_to(&mut buf, image::ImageFormat::Png).is_err() {
+                        log::error!("图标 {icon_id} 编码PNG失败");
+                        return;
+                    }
+                    let bytes = buf.into_inner();
+                    let default_name = format!("ui_{icon_id}.png");
+                    if let Some(file) = rfd::AsyncFileDialog::new()
+                        .set_title("保存图片")
+                        .set_directory(&export_dir)
+                        .set_file_name(&default_name)
+                        .save_file()
+                        .await
+                    {
+                        if let Err(e) = file.write(&bytes).await {
+                            log::error!("保存图标失败: {e}");
+                        } else {
+                            log::info!("图标已保存: {}", file.file_name());
+                        }
+                    }
+                }
+                Ok(either::Either::Left(url)) => {
+                    log::warn!("图标来自URL，暂不支持保存: {url}");
+                }
+                Err(e) => log::error!("读取图标 {icon_id} 失败: {e}"),
+            }
+        }));
+    }
 
     fn execute_delete_csv_versions(&mut self) {
         let versions: Vec<String> = self.delete_csv_selected.iter().cloned().collect();

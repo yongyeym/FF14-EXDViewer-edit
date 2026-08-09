@@ -36,6 +36,8 @@ pub enum Action {
     Select(u32),
     /// A row naming the icon was clicked; hand off to the sheet tab.
     Navigate(String),
+    /// The detail panel asked to save the icon.
+    Save(u32),
 }
 
 /// Which subset of the install's icons the grid is showing.
@@ -161,7 +163,8 @@ impl IconBrowser {
         self.nav.claim(ui.ctx(), backreferences, None);
 
         self.side_panel(ui, backend);
-        let followed = self.detail_panel(ui, backend, icons);
+        let mut save_request = None;
+        let followed = self.detail_panel(ui, backend, icons, &mut save_request);
         let opened = self.grid_panel(ui, backend, icons);
 
         if let Some(icon_id) = self.modal_icon {
@@ -176,6 +179,7 @@ impl IconBrowser {
             .map(Action::Select)
             .or_else(|| followed.map(Action::Navigate))
             .or_else(|| opened.map(Action::Select))
+            .or_else(|| save_request.map(Action::Save))
     }
 
     fn draw_palette(&mut self, ctx: &egui::Context, backend: &Backend) -> Option<u32> {
@@ -706,6 +710,7 @@ impl IconBrowser {
         ui: &mut egui::Ui,
         backend: &Backend,
         icons: &IconManager,
+        save_request: &mut Option<u32>,
     ) -> Option<String> {
         let mut followed = None;
         let mut nav = std::mem::take(&mut self.nav);
@@ -739,7 +744,7 @@ impl IconBrowser {
                 });
 
                 CentralPanel::default().show(ui, |ui| {
-                    followed = self.draw_detail(ui, backend, icons, icon_id, &mut nav);
+                    followed = self.draw_detail(ui, backend, icons, icon_id, &mut nav, save_request);
                 });
             });
         self.nav = nav;
@@ -753,6 +758,7 @@ impl IconBrowser {
         icons: &IconManager,
         icon_id: u32,
         nav: &mut ListNav,
+        save_request: &mut Option<u32>,
     ) -> Option<String> {
         let hires = ALWAYS_HIRES.get(ui.ctx());
         let language = LANGUAGE.get(ui.ctx());
@@ -788,6 +794,10 @@ impl IconBrowser {
             self.modal_icon = Some(icon_id);
         }
 
+        ui.add_space(8.0);
+        if ui.button("保存此图片").clicked() {
+            *save_request = Some(icon_id);
+        }
         ui.add_space(4.0);
         ui.label(
             RichText::new(match size {
@@ -907,11 +917,32 @@ fn pixel_size(ctx: &egui::Context, source: &egui::ImageSource<'static>) -> Optio
 /// Draw an icon centered in `rect` at its own aspect. `Image::paint_at` fills whatever rect it is
 /// given, which stretches everything that is not square.
 fn fit_into(ui: &egui::Ui, source: egui::ImageSource<'static>, rect: egui::Rect) {
-    // 强制图片尺寸等于格子（40×40 等），大图等比缩小、小图等比放大，不再按原始分辨率展示
-    let image = egui::Image::new(source)
-        .maintain_aspect_ratio(true)
-        .fit_to_exact_size(rect.size());
-    image.paint_at(ui, rect);
+    // 等比缩放/放大：长和宽任意一边最大为格子尺寸（40×40 等），不拉伸变形
+    let max = rect.size();
+    let natural = match &source {
+        egui::ImageSource::Texture(texture) => {
+            egui::vec2(texture.size.x as f32, texture.size.y as f32)
+        }
+        egui::ImageSource::Uri(uri) => match ui
+            .ctx()
+            .try_load_image(uri, egui::SizeHint::Scale(1.0.into()))
+        {
+            Ok(egui::load::ImagePoll::Ready { image }) => {
+                let (w, h) = (image.size[0], image.size[1]);
+                egui::vec2(w as f32, h as f32)
+            }
+            _ => max,
+        },
+        egui::ImageSource::Bytes { .. } => max,
+    };
+    let size = if natural.x > 0.0 && natural.y > 0.0 {
+        let scale = (max.x / natural.x).min(max.y / natural.y);
+        natural * scale
+    } else {
+        max
+    };
+    let image = egui::Image::new(source).maintain_aspect_ratio(true);
+    image.paint_at(ui, egui::Rect::from_center_size(rect.center(), size));
 }
 
 fn checkerboard(ui: &egui::Ui, rect: egui::Rect) {
