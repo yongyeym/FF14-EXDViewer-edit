@@ -83,6 +83,17 @@ pub struct IconBrowser {
     palette: Option<Palette>,
     /// 等待用户确认加载反向引用的弹窗
     confirm_walk: bool,
+    // ── 仅显示新增项（图片列表）──
+    /// 图片列表对比状态: idle/loading/ready/error:..
+    img_list_state: String,
+    /// 新增图片 id 字符串列表（计数显示用）
+    img_new_items: Vec<String>,
+    /// 新增图片 id 集合（快速过滤）
+    img_new_ids: std::collections::HashSet<u32>,
+    /// 仅显示新增项开关
+    show_new_imgs_only: bool,
+    /// 图片列表对比 promise
+    img_list_promise: Option<TrackedPromise<Option<(Vec<String>, std::collections::HashSet<u32>)>>>,
 
     /// Keyboard cursor over the backreference list in the detail panel.
     nav: ListNav,
@@ -112,6 +123,11 @@ impl Default for IconBrowser {
             order_by_count: true,
             palette: None,
             confirm_walk: false,
+            img_list_state: "idle".to_string(),
+            img_new_items: Vec::new(),
+            img_new_ids: std::collections::HashSet::new(),
+            show_new_imgs_only: false,
+            img_list_promise: None,
             nav: ListNav::default(),
         }
     }
@@ -276,6 +292,48 @@ impl IconBrowser {
             self.shown_for = None;
         }
 
+        // 启动图片列表"仅显示新增项"对比（复用 list_tracker：保存当前版本列表，
+        // 与旧版本回溯对比，旧列表归档到 config/bak/img_list/）
+        if self.img_list_state == "idle" && !self.all.is_empty() {
+            self.img_list_state = "loading".to_string();
+            let version = backend.game_version().unwrap_or("local").to_string();
+            let ids: Vec<String> = self.all.iter().map(|id| id.to_string()).collect();
+            self.img_list_promise = Some(TrackedPromise::spawn_local(async move {
+                let list = crate::list_tracker::VersionedList {
+                    version: version.clone(),
+                    items: ids,
+                };
+                let safe_ver = version.replace('.', "_");
+                let cur_path =
+                    std::path::PathBuf::from("config").join(format!("img_list_{safe_ver}.json"));
+                crate::list_tracker::save_list(&cur_path, &list);
+                match crate::list_tracker::compare_and_archive(&version, &list, "img_list") {
+                    crate::list_tracker::ComparisonResult::NewItems(items) => {
+                        let set = items.iter().filter_map(|s| s.parse::<u32>().ok()).collect();
+                        Some((items, set))
+                    }
+                    _ => Some((Vec::new(), std::collections::HashSet::new())),
+                }
+            }));
+        }
+        if self.img_list_state == "loading"
+            && let Some(p) = &self.img_list_promise
+            && let Some(result) = p.try_get()
+        {
+            match result {
+                Some((items, set)) => {
+                    self.img_new_items = items.clone();
+                    self.img_new_ids = set.clone();
+                    self.img_list_state = "ready".to_string();
+                    self.shown_for = None;
+                }
+                None => {
+                    self.img_list_state = "error".to_string();
+                }
+            }
+            self.img_list_promise = None;
+        }
+
         if matches!(&self.refs, Load::Loading(p) if p.try_get().is_some()) {
             let Load::Loading(promise) = std::mem::replace(&mut self.refs, Load::Idle) else {
                 unreachable!()
@@ -345,6 +403,18 @@ impl IconBrowser {
                 self.shown.insert(at, icon_id);
             }
         }
+
+        // 更新当前模式下的本地化计数（仅显示新增项时只计新增）
+        self.localized = self
+            .all
+            .iter()
+            .filter(|id| {
+                backend
+                    .icons()
+                    .is_some_and(|icons| icons.localized(**id))
+                    && (!self.show_new_imgs_only || self.img_new_ids.contains(id))
+            })
+            .count();
     }
 
     fn side_panel(&mut self, ui: &mut egui::Ui, backend: &Backend) {
@@ -436,13 +506,15 @@ impl IconBrowser {
                                 Category::Localized,
                                 format!("本地化专属图片（{}）", thousands(localized)),
                             );
+                            let unreferenced = if self.show_new_imgs_only {
+                                self.shown.len()
+                            } else {
+                                self.all.len().saturating_sub(refs.referenced())
+                            };
                             select(
                                 ui,
                                 Category::Unreferenced,
-                                format!(
-                                    "其他图片（{}）",
-                                    thousands(self.all.len().saturating_sub(refs.referenced()))
-                                ),
+                                format!("其他图片（{}）", thousands(unreferenced)),
                             );
                         }
                     }
@@ -524,6 +596,16 @@ impl IconBrowser {
                         }
                         if capped < self.shown.len() && ui.button("全部加载").clicked() {
                             self.pages = self.shown.len().div_ceil(PAGE);
+                        }
+                        // 仅显示新增项（与其他页面一致的 🔍 单符号按钮）
+                        let new_count = self.img_new_items.len();
+                        let is_ready = self.img_list_state.starts_with("ready");
+                        if is_ready && new_count > 0 {
+                            ui.toggle_value(&mut self.show_new_imgs_only, "🔍")
+                                .on_hover_text(format!(
+                                    "仅显示新增项（{}）",
+                                    thousands(new_count)
+                                ));
                         }
                         ui.add_sized(
                             Vec2::new(90.0, ui.spacing().interact_size.y),
