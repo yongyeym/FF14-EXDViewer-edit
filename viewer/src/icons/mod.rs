@@ -908,14 +908,26 @@ impl IconBrowser {
         let path = get_icon_path_indexed(backend.icons().as_ref(), icon_id, hires, language);
 
         let source = icon_source(icons, backend, ui.ctx(), &path);
+        let state_desc = match &source {
+            ManagedIcon::Loaded(_) => "Loaded".to_string(),
+            ManagedIcon::Failed(_) => "Failed".to_string(),
+            ManagedIcon::Loading => "Loading".to_string(),
+            ManagedIcon::NotLoaded => "NotLoaded".to_string(),
+        };
+        log::debug!(
+            "draw_detail: icon {icon_id} source={state_desc} path={path} avail_w={}",
+            ui.available_width()
+        );
         let bounds = Vec2::splat(ui.available_width().min(192.0));
         let mut size = None;
         let zoomed = ui
             .vertical_centered(|ui| match source {
                 ManagedIcon::Loaded(image) => {
                     size = pixel_size(ui.ctx(), &image);
+                    log::debug!("draw_detail: {icon_id} 像素尺寸 {size:?}");
                     let image = egui::Image::new(image).maintain_aspect_ratio(true);
                     let fitted = image.load_and_calc_size(ui, bounds).unwrap_or(bounds);
+                    log::debug!("draw_detail: {icon_id} fitted={fitted:?} bounds={bounds:?}");
                     let (rect, response) = ui.allocate_exact_size(fitted, Sense::click());
                     checkerboard(ui, rect);
                     image.paint_at(ui, rect);
