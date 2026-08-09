@@ -257,6 +257,18 @@ pub struct App {
     delete_csv_selected: std::collections::HashSet<String>,
     delete_csv_confirming: bool,
     delete_csv_done_at: Option<std::time::Instant>,
+    /// 待二次确认的批量导出（是→执行，否→取消）
+    export_confirm: Option<ExportConfirmKind>,
+}
+
+/// 需要二次确认的批量导出类型
+#[derive(Clone, Copy)]
+enum ExportConfirmKind {
+    AllCsv,
+    AllCsvSource,
+    AllMusic,
+    AllMap,
+    AllImages,
 }
 
 fn create_router(ctx: egui::Context) -> Result<Router<App>> {
@@ -332,6 +344,7 @@ impl App {
         self.draw_menubar(ui, on_music, on_maps, on_icons, on_assets);
         self.draw_logger(ui.ctx());
         self.draw_pr_window(ui.ctx());
+        self.draw_export_confirm_window(ui.ctx());
         self.draw_export_progress_window(ui.ctx());
         self.poll_list_promise();
 
@@ -374,6 +387,81 @@ impl App {
 
     fn navigate_replace(&self, path: impl Into<Path>) {
         self.router.get().unwrap().replace(path).unwrap();
+    }
+
+    /// 批量导出二次确认弹窗
+    fn draw_export_confirm_window(&mut self, ctx: &egui::Context) {
+        if self.export_confirm.is_none() {
+            return;
+        }
+        let mut close = false;
+        let mut confirmed = false;
+        egui::Window::new("确认导出")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.set_width(420.0);
+                ui.label(
+                    "导出全部文件耗时较长，本程序可能会长时间无响应或运行卡顿，建议您在导出过程中不要运行FF14游戏。是否确认开始导出？",
+                );
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button("是").clicked() {
+                        confirmed = true;
+                        close = true;
+                    }
+                    if ui.button("否").clicked() {
+                        close = true;
+                    }
+                });
+            });
+        if close {
+            let kind = self.export_confirm.take();
+            if confirmed
+                && let Some(kind) = kind
+            {
+                self.run_export_confirmed(ctx, kind);
+            }
+        }
+    }
+
+    /// 执行确认后的批量导出
+    fn run_export_confirmed(&mut self, ctx: &egui::Context, kind: ExportConfirmKind) {
+        let lang = LANGUAGE.get(ctx);
+        let Some(backend) = self.backend.clone() else { return };
+        let version = self
+            .backend
+            .as_ref()
+            .and_then(|b| b.game_version())
+            .and_then(|v| GameVersion::new(v).ok())
+            .or_else(|| {
+                BACKEND_CONFIG.get(ctx).and_then(|config| {
+                    if let InstallLocation::Web(_, _, v) = &config.location {
+                        v.clone()
+                    } else {
+                        None
+                    }
+                })
+            });
+        match kind {
+            ExportConfirmKind::AllCsv => {
+                self.command_export_all_csv(backend, lang, true, version);
+            }
+            ExportConfirmKind::AllCsvSource => {
+                self.command_export_all_csv(backend, lang, false, version);
+            }
+            ExportConfirmKind::AllMusic => {
+                self.command_export_music(&backend, false);
+            }
+            ExportConfirmKind::AllMap => {
+                self.command_export_map_all(&backend);
+            }
+            ExportConfirmKind::AllImages => {
+                let hires = ALWAYS_HIRES.get(ctx);
+                self.command_export_all_images(backend, hires);
+            }
+        }
     }
 
     /// 全局导出进度窗口（任何页面都会显示，含中断导出按钮）
@@ -747,39 +835,11 @@ impl App {
                     if self.backend.is_some() {
                         ui.menu_button("导出", |ui| {
                             if ui.button("导出全部CSV").clicked() {
-                                let lang = LANGUAGE.get(ctx);
-                                if let Some(backend) = self.backend.clone() {
-                                    let version = self.backend.as_ref().and_then(|b| b.game_version())
-                                        .and_then(|v| GameVersion::new(v).ok())
-                                        .or_else(|| BACKEND_CONFIG.get(ctx).and_then(|c| {
-                                            if let InstallLocation::Web(_, _, v) = &c.location {
-                                                v.clone()
-                                            } else {
-                                                None
-                                            }
-                                        }));
-                                    self.command_export_all_csv(
-                                        backend, lang, true, version,
-                                    );
-                                }
+                                self.export_confirm = Some(ExportConfirmKind::AllCsv);
                                 ui.close();
                             }
                             if ui.button("导出全部CSV源文件").clicked() {
-                                let lang = LANGUAGE.get(ctx);
-                                if let Some(backend) = self.backend.clone() {
-                                    let version = self.backend.as_ref().and_then(|b| b.game_version())
-                                        .and_then(|v| GameVersion::new(v).ok())
-                                        .or_else(|| BACKEND_CONFIG.get(ctx).and_then(|c| {
-                                            if let InstallLocation::Web(_, _, v) = &c.location {
-                                                v.clone()
-                                            } else {
-                                                None
-                                            }
-                                        }));
-                                    self.command_export_all_csv(
-                                        backend, lang, false, version,
-                                    );
-                                }
+                                self.export_confirm = Some(ExportConfirmKind::AllCsvSource);
                                 ui.close();
                             }
                             ui.separator();
@@ -821,15 +881,15 @@ impl App {
                             }
                             ui.separator();
                             if ui.button("导出全部音乐").clicked() {
-                                if let Some(backend) = self.backend.clone() {
-                                    self.command_export_music(&backend, false);
-                                }
+                                self.export_confirm = Some(ExportConfirmKind::AllMusic);
                                 ui.close();
                             }
-                            if ui.button("保存全部地图图片").clicked() {
-                                if let Some(backend) = self.backend.clone() {
-                                    self.command_export_map_all(&backend);
-                                }
+                            if ui.button("导出全部地图图片").clicked() {
+                                self.export_confirm = Some(ExportConfirmKind::AllMap);
+                                ui.close();
+                            }
+                            if ui.button("导出全部图片资源").clicked() {
+                                self.export_confirm = Some(ExportConfirmKind::AllImages);
                                 ui.close();
                             }
                             ui.separator();
@@ -2883,6 +2943,86 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
         }
     }
 
+    /// 导出全部图片资源：图片列表中的全部图片保存到 export/img/ui_{id}.png（含进度窗口与中断）
+    fn command_export_all_images(&mut self, backend: Backend, hires: bool) {
+        let export_dir = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|p| p.join("export").join("img")))
+            .unwrap_or_else(|| std::path::PathBuf::from("export/img"));
+        let _ = std::fs::create_dir_all(&export_dir);
+
+        let ids: Vec<u32> = match backend.icons() {
+            Some(index) => index.ids().collect(),
+            None => Vec::new(),
+        };
+        if ids.is_empty() {
+            log::info!("没有可导出的图片资源（图片索引未加载）");
+            return;
+        }
+        let total = ids.len();
+        log::info!("开始导出全部图片资源，共 {total} 个");
+
+        let progress = self.export_progress.clone();
+        *progress.lock().unwrap() = Some(ExportProgress {
+            active: true,
+            title: "导出全部图片资源".into(),
+            current: 0,
+            total,
+            current_name: String::new(),
+            done: false,
+            error: None,
+            done_at: None,
+            cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        });
+
+        let excel = backend.excel().clone();
+        self.export_promise = Some(TrackedPromise::spawn_local(async move {
+            let mut saved = 0usize;
+            for (i, id) in ids.iter().enumerate() {
+                // 检查中断导出请求
+                if progress.lock().unwrap().as_ref().map_or(false, |p| {
+                    p.cancel.load(std::sync::atomic::Ordering::Relaxed)
+                }) {
+                    log::info!("图片资源导出已中断");
+                    if let Some(p) = progress.lock().unwrap().as_mut() {
+                        p.done = true;
+                        p.active = false;
+                        p.error = Some("已中断导出".into());
+                    }
+                    return;
+                }
+                if let Some(p) = progress.lock().unwrap().as_mut() {
+                    p.current = i + 1;
+                    p.current_name = format!("ui_{id}.png");
+                }
+                match excel.get_icon(*id, hires).await {
+                    Ok(either::Either::Right(image)) => {
+                        let mut buf = std::io::Cursor::new(Vec::new());
+                        if image.write_to(&mut buf, image::ImageFormat::Png).is_ok() {
+                            let fname = format!("ui_{id}.png");
+                            if std::fs::write(export_dir.join(&fname), buf.into_inner()).is_ok() {
+                                saved += 1;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                // 每 10 张让出一帧，保持界面响应
+                if i % 10 == 0 {
+                    crate::utils::yield_to_ui().await;
+                }
+            }
+            if let Some(p) = progress.lock().unwrap().as_mut() {
+                p.done = true;
+                p.active = false;
+            }
+            log::info!(
+                "图片资源导出完成，共保存 {saved} 个（目录: {}）",
+                export_dir.display()
+            );
+        }));
+    }
+
     fn execute_delete_csv_versions(&mut self) {
         let versions: Vec<String> = self.delete_csv_selected.iter().cloned().collect();
         self.delete_csv_selected.clear();
@@ -3441,6 +3581,7 @@ impl App {
             delete_csv_selected: std::collections::HashSet::new(),
             delete_csv_confirming: false,
             delete_csv_done_at: None,
+            export_confirm: None,
         }
     }
 
