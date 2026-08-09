@@ -68,7 +68,7 @@ pub struct IconBrowser {
     loaded_ids: HashSet<u32>,
     /// `all` cut down to the picked category and the id filter; what the grid indexes.
     shown: Vec<u32>,
-    shown_for: Option<(Category, String)>,
+    shown_for: Option<(Category, String, bool)>,
     category: Category,
     search: String,
     lookup: String,
@@ -365,7 +365,11 @@ impl IconBrowser {
     }
 
     fn rebuild_shown(&mut self, backend: &Backend) {
-        let key = (self.category.clone(), self.lookup.clone());
+        let key = (
+            self.category.clone(),
+            self.lookup.clone(),
+            self.show_new_imgs_only,
+        );
         if self.shown_for.as_ref() == Some(&key) {
             return;
         }
@@ -391,6 +395,11 @@ impl IconBrowser {
             (Category::Sheet(sheet), Some(refs)) => refs.icons_of(*sheet),
             _ => self.all.clone(),
         };
+
+        // 仅显示新增项：与分类过滤叠加
+        if self.show_new_imgs_only && self.img_list_state.starts_with("ready") {
+            self.shown.retain(|id| self.img_new_ids.contains(id));
+        }
 
         let lookup = self.lookup.trim();
         if !lookup.is_empty() {
