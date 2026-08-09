@@ -1,36 +1,74 @@
-use egui::{Context, Id, Image, ImageSource, Layout, Modal, Sense, SizeHint, Spinner, TextStyle, UiBuilder};
+use egui::{Color32, Context, Id, Image, ImageSource, Layout, Modal, Sense, SizeHint, Spinner, TextStyle, UiBuilder};
 use egui::load::ImagePoll;
 
 use super::ManagedIcon;
 
-
 /// Show `icon` over the whole app. Returns true once it has been dismissed.
 pub fn icon_modal(ctx: &Context, icon_id: u32, icon: ManagedIcon) -> bool {
-    Modal::new(Id::new("icon-modal"))
+    let mut modal = Modal::new(Id::new("icon-modal"));
+    // 遮罩更透明：避免把右侧预览面板完全盖暗（看起来像面板消失）
+    modal.backdrop_color = Color32::from_black_alpha(50);
+    modal
         .area(Modal::default_area(Id::new(format!(
             "icon-modal-{icon_id}"
         ))))
         .show(ctx, |ui| match icon {
             ManagedIcon::Loaded(source) => {
                 let display = preview_size(ctx, &source);
-                ui.add(Image::new(source).fit_to_exact_size(display))
+                ui.vertical(|ui| {
+                    ui.label(
+                        egui::RichText::new(format!("编号 {icon_id:06}（点击空白处或按 Esc 关闭）"))
+                            .weak()
+                            .small(),
+                    );
+                    ui.add(Image::new(source).fit_to_exact_size(display));
+                });
+                
             }
             ManagedIcon::Failed(e) => {
-                ui.label("图片加载失败").on_hover_text(e.to_string())
+                ui.vertical(|ui| {
+                    ui.label(
+                        egui::RichText::new(format!("编号 {icon_id:06}（点击空白处或按 Esc 关闭）"))
+                            .weak()
+                            .small(),
+                    );
+                    ui.colored_label(Color32::RED, "图片加载失败").on_hover_text(e.to_string());
+                });
+                
             }
             ManagedIcon::Loading => {
-                let (rect, _) = ui.allocate_exact_size(ui.available_size(), Sense::hover());
-                ui.scope_builder(
-                    UiBuilder::new()
-                        .max_rect(rect)
-                        .layout(Layout::centered_and_justified(ui.layout().main_dir())),
-                    |ui| {
-                        ui.add(Spinner::new().size(ui.text_style_height(&TextStyle::Heading) * 3.0))
-                    },
-                )
-                .inner
+                ui.vertical(|ui| {
+                    ui.label(
+                        egui::RichText::new(format!("编号 {icon_id:06}（点击空白处或按 Esc 关闭）"))
+                            .weak()
+                            .small(),
+                    );
+                    let (rect, _) = ui.allocate_exact_size(ui.available_size(), Sense::hover());
+                    ui.scope_builder(
+                        UiBuilder::new()
+                            .max_rect(rect)
+                            .layout(Layout::centered_and_justified(ui.layout().main_dir())),
+                        |ui| {
+                            ui.add(
+                                Spinner::new().size(ui.text_style_height(&TextStyle::Heading) * 3.0),
+                            )
+                        },
+                    )
+                    .inner;
+                });
+                
             }
-            ManagedIcon::NotLoaded => ui.label("图片未加载"),
+            ManagedIcon::NotLoaded => {
+                ui.vertical(|ui| {
+                    ui.label(
+                        egui::RichText::new(format!("编号 {icon_id:06}（点击空白处或按 Esc 关闭）"))
+                            .weak()
+                            .small(),
+                    );
+                    ui.label("图片未加载");
+                });
+                
+            }
         })
         .should_close()
 }
