@@ -83,8 +83,7 @@ pub struct IconBrowser {
     palette: Option<Palette>,
     /// 等待用户确认加载反向引用的弹窗
     confirm_walk: bool,
-    /// 图片未加载完成时等待保存的图标（就绪后立即保存）
-    pending_save: Option<u32>,
+
     /// Keyboard cursor over the backreference list in the detail panel.
     nav: ListNav,
 }
@@ -113,7 +112,6 @@ impl Default for IconBrowser {
             order_by_count: true,
             palette: None,
             confirm_walk: false,
-            pending_save: None,
             nav: ListNav::default(),
         }
     }
@@ -170,14 +168,6 @@ impl IconBrowser {
 
         self.side_panel(ui, backend);
         let mut save_request = None;
-        // 待保存图片就绪（png_cache 已填充）→ 立即触发保存
-        if let Some(pending) = self.pending_save {
-            let hires = ALWAYS_HIRES.get(ui.ctx());
-            if icons.get_png_bytes(pending, hires).is_some() {
-                self.pending_save = None;
-                save_request = Some(pending);
-            }
-        }
         // 反向引用确认弹窗（Window 控制关闭，三段提示分行展示）
         if self.confirm_walk {
             let mut confirmed = false;
@@ -842,23 +832,9 @@ impl IconBrowser {
         }
 
         ui.add_space(8.0);
-        let loaded = icons
-            .get_png_bytes(icon_id, hires)
-            .is_some();
+        // 点击即触发保存：优先用已缓存 PNG，未命中时同步读取（保存优先，不等加载队列）
         if ui.button("保存此图片").clicked() {
-            if loaded {
-                *save_request = Some(icon_id);
-            } else {
-                // 图片还在加载：记录待保存，就绪后优先执行
-                self.pending_save = Some(icon_id);
-            }
-        }
-        if let Some(pending) = self.pending_save {
-            ui.label(
-                RichText::new(format!("正在等待图片 {pending:06} 加载完成后保存…"))
-                    .weak()
-                    .small(),
-            );
+            *save_request = Some(icon_id);
         }
         ui.add_space(4.0);
         ui.label(

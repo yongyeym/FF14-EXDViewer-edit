@@ -2842,32 +2842,33 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
             .unwrap_or_else(|| std::path::PathBuf::from("export/img"));
         let _ = std::fs::create_dir_all(&export_dir);
 
-        let excel = backend.excel().clone();
-        self.export_promise = Some(TrackedPromise::spawn_local(async move {
-            // 优先使用已缓存的 PNG 字节（立即保存，不等图片加载队列）
-            let bytes = if let Some(bytes) = png_bytes {
-                bytes
-            } else {
-                // 缓存未命中：重新读取并编码
-                match excel.get_icon(icon_id, hires).await {
-                    Ok(either::Either::Right(image)) => {
-                        let mut buf = std::io::Cursor::new(Vec::new());
-                        if image.write_to(&mut buf, image::ImageFormat::Png).is_err() {
-                            log::error!("图片 {icon_id} 编码PNG失败");
-                            return;
-                        }
-                        buf.into_inner()
-                    }
-                    Ok(either::Either::Left(url)) => {
-                        log::warn!("图片来自URL，暂不支持保存: {url}");
+        // 数据获取：优先使用已缓存的 PNG 字节（立即保存）；
+        // 缓存未命中时用 block_on 同步读取（不进入加载队列，保存优先执行）
+        let bytes = if let Some(bytes) = png_bytes {
+            bytes
+        } else {
+            let excel = backend.excel().clone();
+            match futures::executor::block_on(excel.get_icon(icon_id, hires)) {
+                Ok(either::Either::Right(image)) => {
+                    let mut buf = std::io::Cursor::new(Vec::new());
+                    if image.write_to(&mut buf, image::ImageFormat::Png).is_err() {
+                        log::error!("图片 {icon_id} 编码PNG失败");
                         return;
                     }
-                    Err(e) => {
-                        log::error!("读取图片 {icon_id} 失败: {e}");
-                        return;
-                    }
+                    buf.into_inner()
                 }
-            };
+                Ok(either::Either::Left(url)) => {
+                    log::warn!("图片来自URL，暂不支持保存: {url}");
+                    return;
+                }
+                Err(e) => {
+                    log::error!("读取图片 {icon_id} 失败: {e}");
+                    return;
+                }
+            }
+        };
+        // rfd 文件选择器 + 写文件（异步，不阻塞 UI）
+        self.export_promise = Some(TrackedPromise::spawn_local(async move {
             let default_name = format!("ui_{icon_id}.png");
             if let Some(file) = rfd::AsyncFileDialog::new()
                 .set_title("保存图片")
