@@ -5,9 +5,7 @@ use super::ManagedIcon;
 
 /// Show `icon` over the whole app. Returns true once it has been dismissed.
 pub fn icon_modal(ctx: &Context, icon_id: u32, icon: ManagedIcon) -> bool {
-    let mut modal = Modal::new(Id::new("icon-modal"));
-    // 遮罩更透明：避免把右侧预览面板完全盖暗（看起来像面板消失）
-    modal.backdrop_color = Color32::from_black_alpha(50);
+    let modal = Modal::new(Id::new("icon-modal"));
     modal
         .area(Modal::default_area(Id::new(format!(
             "icon-modal-{icon_id}"

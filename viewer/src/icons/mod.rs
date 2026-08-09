@@ -874,7 +874,20 @@ impl IconBrowser {
                 });
 
                 CentralPanel::default().show(ui, |ui| {
-                    followed = self.draw_detail(ui, backend, icons, icon_id, &mut nav, save_request);
+                    // 内容宽度不超出面板，避免长文本/大图撑爆布局导致面板绘制被跳过
+                    ui.set_max_width(ui.available_width());
+                    egui::ScrollArea::vertical()
+                        .auto_shrink(false)
+                        .show(ui, |ui| {
+                            followed = self.draw_detail(
+                                ui,
+                                backend,
+                                icons,
+                                icon_id,
+                                &mut nav,
+                                save_request,
+                            );
+                        });
                 });
             });
         self.nav = nav;
