@@ -871,32 +871,32 @@ impl App {
                     if ui
                         .add_sized(
                             seg,
-                            Button::selectable(!on_music && !on_maps && !on_icons && !on_assets, "数据列表"),
+                            Button::selectable(!on_music && !on_maps && !on_icons && !on_assets, "数据"),
                         )
                         .clicked()
                     {
                         self.navigate("/sheet");
                     }
                     if ui
-                        .add_sized(seg, Button::selectable(on_icons, "图标列表"))
+                        .add_sized(seg, Button::selectable(on_icons, "图片"))
                         .clicked()
                     {
                         self.navigate("/icons");
                     }
                     if ui
-                        .add_sized(seg, Button::selectable(on_maps, "地图列表"))
+                        .add_sized(seg, Button::selectable(on_maps, "地图"))
                         .clicked()
                     {
                         self.navigate("/maps");
                     }
                     if ui
-                        .add_sized(seg, Button::selectable(on_music, "音乐列表"))
+                        .add_sized(seg, Button::selectable(on_music, "音乐"))
                         .clicked()
                     {
                         self.navigate("/music");
                     }
                     if ui
-                        .add_sized(seg, Button::selectable(on_assets, "资源列表"))
+                        .add_sized(seg, Button::selectable(on_assets, "资源"))
                         .clicked()
                     {
                         self.navigate("/assets");
@@ -977,7 +977,7 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                 ui.horizontal(|ui| {
                     ui.with_layout(Layout::right_to_left(egui::Align::Min), |ui| {
                         CollapsibleSidePanel::draw_arrow(ui, "sheet_list");
-                        ui.vertical_centered_justified(|ui| ui.heading("数据列表"));
+                        ui.vertical_centered_justified(|ui| ui.heading("数据"));
                     });
                 });
                 ui.add_space(4.0);
@@ -2182,7 +2182,7 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
         if let Some(icon_id) = self.icons.selected() {
             return RouteResponse::Redirect(Path::from(format!("/icons/{icon_id}")));
         }
-        RouteResponse::Title("图标列表".to_string())
+        RouteResponse::Title("图片".to_string())
     }
 
     fn on_icon(
@@ -2224,7 +2224,7 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
         if let Some(asset) = self.assets.selected() {
             return RouteResponse::Redirect(Path::from(format!("/assets/{asset}")));
         }
-        RouteResponse::Title("资源列表".to_string())
+        RouteResponse::Title("资源".to_string())
     }
 
     fn on_asset_path(
@@ -2240,7 +2240,7 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
             return RouteResponse::Redirect(Path::from("/assets"));
         };
         self.assets.request(asset.to_string());
-        RouteResponse::Title("资源列表".to_string())
+        RouteResponse::Title("资源".to_string())
     }
 
     fn draw_assets(&mut self, ui: &mut egui::Ui, _path: &Path, _params: &Params<'_, '_>) {

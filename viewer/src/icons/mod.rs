@@ -81,6 +81,8 @@ pub struct IconBrowser {
     zoom: usize,
     order_by_count: bool,
     palette: Option<Palette>,
+    /// 等待用户确认加载反向引用的弹窗
+    confirm_walk: bool,
     /// Keyboard cursor over the backreference list in the detail panel.
     nav: ListNav,
 }
@@ -108,6 +110,7 @@ impl Default for IconBrowser {
             zoom: 1,
             order_by_count: true,
             palette: None,
+            confirm_walk: false,
             nav: ListNav::default(),
         }
     }
@@ -141,7 +144,7 @@ impl IconBrowser {
     }
 
     pub fn open_palette(&mut self) {
-        self.palette = Some(Palette::new("查找图标…", "编号", self.lookup.clone()));
+        self.palette = Some(Palette::new("查找图片…", "编号", self.lookup.clone()));
     }
 
     pub fn ui(
@@ -163,6 +166,29 @@ impl IconBrowser {
         self.nav.claim(ui.ctx(), backreferences, None);
 
         self.side_panel(ui, backend);
+        if self.confirm_walk {
+            let mut confirmed = false;
+            egui::Modal::new(egui::Id::new("icon_walk_confirm")).show(ui.ctx(), |ui| {
+                ui.set_width(420.0);
+                ui.label(
+                    "读取全部包含图片引用的游戏数据表进行解析，完成后将在此页面的图片预览窗口下方标明引用了此图片的相关数据表名称和对应的行号。注意：每次打开程序都需要重新解析引用。此过程会耗时较久，请耐心等待，是否确定开始加载反向引用？",
+                );
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button("是").clicked() {
+                        confirmed = true;
+                        ui.close();
+                    }
+                    if ui.button("否").clicked() {
+                        ui.close();
+                    }
+                });
+            });
+            if confirmed {
+                self.confirm_walk = false;
+                self.start_walk(backend);
+            }
+        }
         let mut save_request = None;
         let followed = self.detail_panel(ui, backend, icons, &mut save_request);
         let opened = self.grid_panel(ui, backend, icons);
@@ -320,7 +346,7 @@ impl IconBrowser {
                 ui.horizontal(|ui| {
                     ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
                         CollapsibleSidePanel::draw_arrow(ui, "icon_tree");
-                        ui.vertical_centered_justified(|ui| ui.heading("图标"));
+                        ui.vertical_centered_justified(|ui| ui.heading("图片"));
                     });
                 });
                 ui.add_space(4.0);
@@ -363,7 +389,7 @@ impl IconBrowser {
                     select(
                         ui,
                         Category::All,
-                        format!("全部图标（{}）", thousands(self.all.len())),
+                        format!("全部图片（{}）", thousands(self.all.len())),
                     );
                 }
 
@@ -397,13 +423,13 @@ impl IconBrowser {
                             select(
                                 ui,
                                 Category::Localized,
-                                format!("本地化专属图标（{}）", thousands(localized)),
+                                format!("本地化专属图片（{}）", thousands(localized)),
                             );
                             select(
                                 ui,
                                 Category::Unreferenced,
                                 format!(
-                                    "其他图标（{}）",
+                                    "其他图片（{}）",
                                     thousands(self.all.len().saturating_sub(refs.referenced()))
                                 ),
                             );
@@ -432,21 +458,11 @@ impl IconBrowser {
                     }
                     Load::Idle => {
                         ui.add_space(8.0);
-                        if query.is_empty()
-                            && ui
-                                .button("点击加载反向引用")
-                                .on_hover_text(
-                                    "读取所有引用图标的表，以便列出使用它的行。数据量达数十 MB。",
-                                )
-                                .clicked()
-                        {
-                            self.start_walk(backend);
-                        }
                         if query.is_empty() {
                             select(
                                 ui,
                                 Category::Localized,
-                                format!("本地化专属图标（{}）", thousands(localized)),
+                                format!("本地化专属图片（{}）", thousands(localized)),
                             );
                         }
                     }
@@ -473,9 +489,9 @@ impl IconBrowser {
                     }
                     let capped = self.shown.len().min(self.pages * PAGE);
                     ui.label(if capped < self.shown.len() {
-                        format!("{} 个图标，滚动查看更多", thousands(capped))
+                        format!("{} 个图片，滚动查看更多", thousands(capped))
                     } else {
-                        format!("{} 个图标", thousands(self.shown.len()))
+                        format!("{} 个图片", thousands(self.shown.len()))
                     });
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if CollapsibleSidePanel::is_collapsed(ui.ctx(), "icon_info") {
@@ -502,6 +518,16 @@ impl IconBrowser {
                             Vec2::new(90.0, ui.spacing().interact_size.y),
                             TextEdit::singleline(&mut self.lookup).hint_text("Id"),
                         );
+                        if matches!(self.refs, Load::Idle)
+                            && ui
+                                .button("点击加载反向引用")
+                                .on_hover_text(
+                                    "读取所有引用图片的表，以便列出使用它的行。数据量达数十 MB。",
+                                )
+                                .clicked()
+                        {
+                            self.confirm_walk = true;
+                        }
                     });
                 });
                 ui.add_space(4.0);
@@ -722,7 +748,7 @@ impl IconBrowser {
                 }
                 let Some(icon_id) = self.selected else {
                     ui.centered_and_justified(|ui| {
-                        ui.label(RichText::new("未选择图标").weak());
+                        ui.label(RichText::new("未选择图片").weak());
                     });
                     return;
                 };
@@ -736,7 +762,7 @@ impl IconBrowser {
                             // on the space left over beside it.
                             ui.add_space(ui.spacing().indent);
                             ui.vertical_centered_justified(|ui| {
-                                ui.heading(format!("图标 {icon_id:06}"));
+                                ui.heading(format!("图片 {icon_id:06}"));
                             });
                         });
                     });
@@ -781,7 +807,7 @@ impl IconBrowser {
                         .clicked()
                 }
                 ManagedIcon::Failed(_) => {
-                    ui.colored_label(Color32::RED, "图标加载失败");
+                    ui.colored_label(Color32::RED, "图片加载失败");
                     false
                 }
                 ManagedIcon::Loading | ManagedIcon::NotLoaded => {
@@ -888,7 +914,7 @@ fn icon_source(
     };
     let Ok(icon_id) = stem.parse::<u32>() else {
         return ManagedIcon::Failed(CloneableError::from(anyhow::anyhow!(
-            "无效图标ID: {path}"
+            "无效图片ID: {path}"
         )));
     };
     let excel = backend.excel().clone();
