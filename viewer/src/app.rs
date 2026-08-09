@@ -2867,23 +2867,20 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                 }
             }
         };
-        // rfd 文件选择器 + 写文件（异步，不阻塞 UI）
-        self.export_promise = Some(TrackedPromise::spawn_local(async move {
-            let default_name = format!("ui_{icon_id}.png");
-            if let Some(file) = rfd::AsyncFileDialog::new()
-                .set_title("保存图片")
-                .set_directory(&export_dir)
-                .set_file_name(&default_name)
-                .save_file()
-                .await
-            {
-                if let Err(e) = file.write(&bytes).await {
-                    log::error!("保存图片失败: {e}");
-                } else {
-                    log::info!("图片已保存: {}", file.file_name());
-                }
+        // 同步 rfd 文件选择器：立即弹出（不进入异步加载队列，避免等图片全部加载完）
+        let default_name = format!("ui_{icon_id}.png");
+        if let Some(path) = rfd::FileDialog::new()
+            .set_title("保存图片")
+            .set_directory(&export_dir)
+            .set_file_name(&default_name)
+            .save_file()
+        {
+            if let Err(e) = std::fs::write(&path, &bytes) {
+                log::error!("保存图片失败: {e}");
+            } else {
+                log::info!("图片已保存: {}", path.display());
             }
-        }));
+        }
     }
 
     fn execute_delete_csv_versions(&mut self) {
