@@ -2928,7 +2928,7 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
             }
         };
         // 同步 rfd 文件选择器：立即弹出（不进入异步加载队列，避免等图片全部加载完）
-        let default_name = format!("ui_{icon_id}.png");
+        let default_name = format!("ui_{icon_id:06}.png");
         if let Some(path) = rfd::FileDialog::new()
             .set_title("保存图片")
             .set_directory(&export_dir)
@@ -2993,13 +2993,13 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                 }
                 if let Some(p) = progress.lock().unwrap().as_mut() {
                     p.current = i + 1;
-                    p.current_name = format!("ui_{id}.png");
+                    p.current_name = format!("ui_{id:06}.png");
                 }
                 match excel.get_icon(*id, hires).await {
                     Ok(either::Either::Right(image)) => {
                         let mut buf = std::io::Cursor::new(Vec::new());
                         if image.write_to(&mut buf, image::ImageFormat::Png).is_ok() {
-                            let fname = format!("ui_{id}.png");
+                            let fname = format!("ui_{id:06}.png");
                             if std::fs::write(export_dir.join(&fname), buf.into_inner()).is_ok() {
                                 saved += 1;
                             }

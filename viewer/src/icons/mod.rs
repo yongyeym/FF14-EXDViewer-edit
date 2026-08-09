@@ -844,6 +844,8 @@ impl IconBrowser {
         let mut nav = std::mem::take(&mut self.nav);
         CollapsibleSidePanel::new("icon_info", Side::Right)
             .collapsed_width(0.0)
+            .default_width(300.0)
+            .resizable(false)
             .show(ui, |ui, is_open| {
                 if !is_open {
                     return;
