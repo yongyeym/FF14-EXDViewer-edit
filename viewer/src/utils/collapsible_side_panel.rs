@@ -75,6 +75,8 @@ impl CollapsibleSidePanel {
             let mut is_expanded = is_expanded;
             let expanded_panel = self.side.panel(self.id).resizable(self.resizable);
             let expanded_panel = match self.default_width {
+                // 不可拖时用 exact_size 强制固定宽度（覆盖记忆的拖拽宽度，避免被内容撑宽）
+                Some(w) if !self.resizable => expanded_panel.exact_size(w),
                 Some(w) => expanded_panel.default_size(w),
                 None => expanded_panel,
             };

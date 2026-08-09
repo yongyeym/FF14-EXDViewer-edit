@@ -3,8 +3,6 @@ use egui::load::ImagePoll;
 
 use super::ManagedIcon;
 
-/// 预览窗口最大尺寸（原始图片超出时等比缩放至此尺寸内）
-const MAX_PREVIEW: f32 = 800.0;
 
 /// Show `icon` over the whole app. Returns true once it has been dismissed.
 pub fn icon_modal(ctx: &Context, icon_id: u32, icon: ManagedIcon) -> bool {
@@ -39,6 +37,8 @@ pub fn icon_modal(ctx: &Context, icon_id: u32, icon: ManagedIcon) -> bool {
 
 /// 预览显示尺寸：小图按原始分辨率；大图等比缩放到最大尺寸内。
 fn preview_size(ctx: &Context, source: &ImageSource<'static>) -> egui::Vec2 {
+    // 最大尺寸：程序主窗口分辨率的 80%
+    let max_preview = ctx.viewport_rect().size() * 0.8;
     let natural = match source {
         ImageSource::Texture(texture) => {
             Some(egui::vec2(texture.size.x as f32, texture.size.y as f32))
@@ -52,17 +52,17 @@ fn preview_size(ctx: &Context, source: &ImageSource<'static>) -> egui::Vec2 {
         _ => None,
     };
     let Some(natural) = natural else {
-        return egui::vec2(MAX_PREVIEW, MAX_PREVIEW);
+        return max_preview;
     };
     if natural.x <= 0.0 || natural.y <= 0.0 {
-        return egui::vec2(MAX_PREVIEW, MAX_PREVIEW);
+        return max_preview;
     }
-    if natural.x <= MAX_PREVIEW && natural.y <= MAX_PREVIEW {
+    if natural.x <= max_preview.x && natural.y <= max_preview.y {
         // 原始图片较小：按原始分辨率显示
         natural
     } else {
         // 原始图片较大：等比缩放到最大尺寸内
-        let scale = (MAX_PREVIEW / natural.x).min(MAX_PREVIEW / natural.y);
+        let scale = (max_preview.x / natural.x).min(max_preview.y / natural.y);
         natural * scale
     }
 }
