@@ -83,6 +83,8 @@ pub struct IconBrowser {
     palette: Option<Palette>,
     /// 等待用户确认加载反向引用的弹窗
     confirm_walk: bool,
+    /// 图片未加载完成时等待保存的图标（就绪后立即保存）
+    pending_save: Option<u32>,
     /// Keyboard cursor over the backreference list in the detail panel.
     nav: ListNav,
 }
@@ -111,6 +113,7 @@ impl Default for IconBrowser {
             order_by_count: true,
             palette: None,
             confirm_walk: false,
+            pending_save: None,
             nav: ListNav::default(),
         }
     }
@@ -166,30 +169,48 @@ impl IconBrowser {
         self.nav.claim(ui.ctx(), backreferences, None);
 
         self.side_panel(ui, backend);
+        let mut save_request = None;
+        // 待保存图片就绪（png_cache 已填充）→ 立即触发保存
+        if let Some(pending) = self.pending_save {
+            let hires = ALWAYS_HIRES.get(ui.ctx());
+            if icons.get_png_bytes(pending, hires).is_some() {
+                self.pending_save = None;
+                save_request = Some(pending);
+            }
+        }
+        // 反向引用确认弹窗（Window 控制关闭，三段提示分行展示）
         if self.confirm_walk {
             let mut confirmed = false;
-            egui::Modal::new(egui::Id::new("icon_walk_confirm")).show(ui.ctx(), |ui| {
-                ui.set_width(420.0);
-                ui.label(
-                    "读取全部包含图片引用的游戏数据表进行解析，完成后将在此页面的图片预览窗口下方标明引用了此图片的相关数据表名称和对应的行号。注意：每次打开程序都需要重新解析引用。此过程会耗时较久，请耐心等待，是否确定开始加载反向引用？",
-                );
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    if ui.button("是").clicked() {
-                        confirmed = true;
-                        ui.close();
-                    }
-                    if ui.button("否").clicked() {
-                        ui.close();
-                    }
+            let mut close = false;
+            egui::Window::new("确认加载反向引用")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ui.ctx(), |ui| {
+                    ui.set_width(420.0);
+                    ui.label(
+                        "读取全部包含图片引用的游戏数据表进行解析，完成后将在此页面的图片预览窗口下方标明引用了此图片的相关数据表名称和对应的行号。",
+                    );
+                    ui.label("注意：每次打开程序都需要重新解析引用。");
+                    ui.label("此过程会耗时较久，请耐心等待，是否确定开始加载反向引用？");
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("是").clicked() {
+                            confirmed = true;
+                            close = true;
+                        }
+                        if ui.button("否").clicked() {
+                            close = true;
+                        }
+                    });
                 });
-            });
-            if confirmed {
+            if close {
                 self.confirm_walk = false;
+            }
+            if confirmed {
                 self.start_walk(backend);
             }
         }
-        let mut save_request = None;
         let followed = self.detail_panel(ui, backend, icons, &mut save_request);
         let opened = self.grid_panel(ui, backend, icons);
 
@@ -762,7 +783,7 @@ impl IconBrowser {
                             // on the space left over beside it.
                             ui.add_space(ui.spacing().indent);
                             ui.vertical_centered_justified(|ui| {
-                                ui.heading(format!("图片 {icon_id:06}"));
+                                ui.heading(format!("编号 {icon_id:06}"));
                             });
                         });
                     });
@@ -821,8 +842,23 @@ impl IconBrowser {
         }
 
         ui.add_space(8.0);
+        let loaded = icons
+            .get_png_bytes(icon_id, hires)
+            .is_some();
         if ui.button("保存此图片").clicked() {
-            *save_request = Some(icon_id);
+            if loaded {
+                *save_request = Some(icon_id);
+            } else {
+                // 图片还在加载：记录待保存，就绪后优先执行
+                self.pending_save = Some(icon_id);
+            }
+        }
+        if let Some(pending) = self.pending_save {
+            ui.label(
+                RichText::new(format!("正在等待图片 {pending:06} 加载完成后保存…"))
+                    .weak()
+                    .small(),
+            );
         }
         ui.add_space(4.0);
         ui.label(

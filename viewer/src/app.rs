@@ -2206,7 +2206,9 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                 icons::Action::Navigate(route) => self.navigate(route),
                 icons::Action::Save(icon_id) => {
                     let hires = ALWAYS_HIRES.get(ui.ctx());
-                    self.command_save_icon_detail(backend.clone(), icon_id, hires);
+                    // 优先用 IconManager 缓存中的 PNG（图片已加载时立即保存，不等待）
+                    let png = self.icon_manager.get_png_bytes(icon_id, hires);
+                    self.command_save_icon_detail(backend.clone(), icon_id, hires, png);
                 }
             }
         }
@@ -2826,7 +2828,14 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
 
 
     /// 保存图标列表预览区的单个图标：rfd 文件选择器，默认 export/img/ + ui_{icon_id}.png
-    fn command_save_icon_detail(&mut self, backend: Backend, icon_id: u32, hires: bool) {
+    /// `png_bytes` 优先：图片已在 IconManager 缓存中则立即保存，无需等待加载。
+    fn command_save_icon_detail(
+        &mut self,
+        backend: Backend,
+        icon_id: u32,
+        hires: bool,
+        png_bytes: Option<Vec<u8>>,
+    ) {
         let export_dir = std::env::current_exe()
             .ok()
             .and_then(|p| p.parent().map(|p| p.join("export").join("img")))
@@ -2835,33 +2844,43 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
 
         let excel = backend.excel().clone();
         self.export_promise = Some(TrackedPromise::spawn_local(async move {
-            match excel.get_icon(icon_id, hires).await {
-                Ok(either::Either::Right(image)) => {
-                    let mut buf = std::io::Cursor::new(Vec::new());
-                    if image.write_to(&mut buf, image::ImageFormat::Png).is_err() {
-                        log::error!("图标 {icon_id} 编码PNG失败");
+            // 优先使用已缓存的 PNG 字节（立即保存，不等图片加载队列）
+            let bytes = if let Some(bytes) = png_bytes {
+                bytes
+            } else {
+                // 缓存未命中：重新读取并编码
+                match excel.get_icon(icon_id, hires).await {
+                    Ok(either::Either::Right(image)) => {
+                        let mut buf = std::io::Cursor::new(Vec::new());
+                        if image.write_to(&mut buf, image::ImageFormat::Png).is_err() {
+                            log::error!("图片 {icon_id} 编码PNG失败");
+                            return;
+                        }
+                        buf.into_inner()
+                    }
+                    Ok(either::Either::Left(url)) => {
+                        log::warn!("图片来自URL，暂不支持保存: {url}");
                         return;
                     }
-                    let bytes = buf.into_inner();
-                    let default_name = format!("ui_{icon_id}.png");
-                    if let Some(file) = rfd::AsyncFileDialog::new()
-                        .set_title("保存图片")
-                        .set_directory(&export_dir)
-                        .set_file_name(&default_name)
-                        .save_file()
-                        .await
-                    {
-                        if let Err(e) = file.write(&bytes).await {
-                            log::error!("保存图标失败: {e}");
-                        } else {
-                            log::info!("图标已保存: {}", file.file_name());
-                        }
+                    Err(e) => {
+                        log::error!("读取图片 {icon_id} 失败: {e}");
+                        return;
                     }
                 }
-                Ok(either::Either::Left(url)) => {
-                    log::warn!("图标来自URL，暂不支持保存: {url}");
+            };
+            let default_name = format!("ui_{icon_id}.png");
+            if let Some(file) = rfd::AsyncFileDialog::new()
+                .set_title("保存图片")
+                .set_directory(&export_dir)
+                .set_file_name(&default_name)
+                .save_file()
+                .await
+            {
+                if let Err(e) = file.write(&bytes).await {
+                    log::error!("保存图片失败: {e}");
+                } else {
+                    log::info!("图片已保存: {}", file.file_name());
                 }
-                Err(e) => log::error!("读取图标 {icon_id} 失败: {e}"),
             }
         }));
     }
