@@ -24,3 +24,4 @@ callgrind.out.*
 .hermes-pet-build/
 config/*_list_*.json
 log.txt
+log*.txt
