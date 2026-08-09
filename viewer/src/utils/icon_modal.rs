@@ -15,7 +15,7 @@ pub fn icon_modal(ctx: &Context, icon_id: u32, icon: ManagedIcon) -> bool {
                 let display = preview_size(ctx, &source);
                 ui.vertical(|ui| {
                     ui.label(
-                        egui::RichText::new(format!("编号 {icon_id:06}（点击空白处或按 Esc 关闭）"))
+                        egui::RichText::new(format!("编号 {icon_id:06}"))
                             .weak()
                             .small(),
                     );
@@ -26,7 +26,7 @@ pub fn icon_modal(ctx: &Context, icon_id: u32, icon: ManagedIcon) -> bool {
             ManagedIcon::Failed(e) => {
                 ui.vertical(|ui| {
                     ui.label(
-                        egui::RichText::new(format!("编号 {icon_id:06}（点击空白处或按 Esc 关闭）"))
+                        egui::RichText::new(format!("编号 {icon_id:06}"))
                             .weak()
                             .small(),
                     );
@@ -37,7 +37,7 @@ pub fn icon_modal(ctx: &Context, icon_id: u32, icon: ManagedIcon) -> bool {
             ManagedIcon::Loading => {
                 ui.vertical(|ui| {
                     ui.label(
-                        egui::RichText::new(format!("编号 {icon_id:06}（点击空白处或按 Esc 关闭）"))
+                        egui::RichText::new(format!("编号 {icon_id:06}"))
                             .weak()
                             .small(),
                     );
@@ -59,7 +59,7 @@ pub fn icon_modal(ctx: &Context, icon_id: u32, icon: ManagedIcon) -> bool {
             ManagedIcon::NotLoaded => {
                 ui.vertical(|ui| {
                     ui.label(
-                        egui::RichText::new(format!("编号 {icon_id:06}（点击空白处或按 Esc 关闭）"))
+                        egui::RichText::new(format!("编号 {icon_id:06}"))
                             .weak()
                             .small(),
                     );
