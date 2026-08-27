@@ -17,6 +17,8 @@ pub struct DiffState {
     pub modal_icon_id: Option<u32>,
     /// 发起对比时所在的数据表名（切换数据表时自动取消对比）
     pub sheet: String,
+    /// 仅筛选关键列变更（只对比 schema yml displayField 指定的列）
+    pub filter_key_column: bool,
 }
 
 #[derive(Clone)]
@@ -40,6 +42,7 @@ impl DiffState {
             columns: Vec::new(),
             modal_icon_id: None,
             sheet: String::new(),
+            filter_key_column: false,
         }
     }
 }
@@ -75,8 +78,14 @@ pub fn has_csv_for_sheet(version: &str, sheet_name: &str) -> bool {
 
 /// Load CSV into a map: row_id -> (row_hash, cell_values).
 /// Uses case-insensitive hashing to avoid FALSE/false noise.
-fn load_csv_ci(version: &str, sheet_name: &str) -> Result<(Vec<String>, HashMap<String, (u64, Vec<String>)>), String> {
-    let csv_path = exe_export_data_dir().join(version).join(format!("{sheet_name}.csv"));
+fn load_csv_ci(
+    version: &str,
+    sheet_name: &str,
+    key_column: Option<&str>,
+) -> Result<(Vec<String>, HashMap<String, (u64, Vec<String>)>), String> {
+    let csv_path = exe_export_data_dir()
+        .join(version)
+        .join(format!("{sheet_name}.csv"));
     log::debug!("load_csv_ci: {:?}", csv_path);
     let raw = std::fs::read(&csv_path).map_err(|e| format!("读取CSV失败: {e}"))?;
     let content = if raw.starts_with(b"\xef\xbb\xbf") {
@@ -93,6 +102,17 @@ fn load_csv_ci(version: &str, sheet_name: &str) -> Result<(Vec<String>, HashMap<
 
     // Detect if CSV has 'Subrow' column (skip it if present)
     let has_subrow = headers.get(1).map(|h| h == "Subrow").unwrap_or(false);
+    let skip = if has_subrow { 2 } else { 1 };
+
+    // 关键列：仅在 CSV 表头中找到 displayField 列，则只对比该列（key_idx 为 values 中索引）
+    let key_idx: Option<usize> = match key_column {
+        Some(kc) => match headers.iter().position(|h| h == kc) {
+            Some(hi) if hi >= skip => Some(hi - skip),
+            Some(_) => return Err(format!("关键列「{kc}」位于行标识之后，无法定位值索引")),
+            None => return Err(format!("CSV中未找到关键列「{kc}」，可能该列未导出或列名不匹配")),
+        },
+        None => None,
+    };
 
     for result in reader.records() {
         let record = result.map_err(|e| format!("CSV记录解析失败: {e}"))?;
@@ -104,7 +124,10 @@ fn load_csv_ci(version: &str, sheet_name: &str) -> Result<(Vec<String>, HashMap<
         }
         .map(|v| v.to_ascii_lowercase())
         .collect();
-        let hash = ci_hash(&values);
+        let hash = match key_idx {
+            Some(ki) => ci_hash_keyed(&values, ki),
+            None => ci_hash(&values),
+        };
         rows.entry(row_id).or_insert((hash, values));
     }
     Ok((headers, rows))
@@ -122,10 +145,25 @@ fn ci_hash(values: &[String]) -> u64 {
     h.finish()
 }
 
+/// 关键列哈希：只对指定列（value 索引）做哈希，其他列不影响差异判定。
+fn ci_hash_keyed(values: &[String], key: usize) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    match values.get(key) {
+        Some(v) => {
+            v.len().hash(&mut h);
+            v.hash(&mut h);
+        }
+        None => 0u8.hash(&mut h),
+    }
+    h.finish()
+}
+
 /// Compare two row maps and produce diff entries.
 fn compute_diff(
     old: &HashMap<String, (u64, Vec<String>)>,
     new: &HashMap<String, (u64, Vec<String>)>,
+    key_idx: Option<usize>,
 ) -> Vec<DiffRow> {
     let mut result = Vec::new();
     let all: Vec<&String> = old.keys().chain(new.keys()).collect();
@@ -140,11 +178,19 @@ fn compute_diff(
             (None, Some((_, cells))) => { result.push(DiffRow { row_key: key.clone(), diff_type: DiffType::Added, cells: cells.clone() }); }
             (Some((_, oc)), Some((_, nc))) => {
                 let common = oc.len().min(nc.len());
-                let cells_match = oc[..common] == nc[..common];
+                let cells_match = match key_idx {
+                    // 关键列模式：只对比指定的关键列
+                    Some(ki) => oc.get(ki).zip(nc.get(ki)).map(|(a, b)| a == b).unwrap_or(false),
+                    None => oc[..common] == nc[..common],
+                };
                 if !cells_match {
                     // Smart comparison: check if differing cells are numerically equal
                     let mut real_diffs = Vec::new();
-                    for i in 0..common {
+                    let range: Box<dyn Iterator<Item = usize>> = match key_idx {
+                        Some(ki) => Box::new(std::iter::once(ki)),
+                        None => Box::new(0..common),
+                    };
+                    for i in range {
                         if oc[i] != nc[i] {
                             // Try numeric comparison (handles scientific notation vs decimal)
                             let numeric_eq = match (oc[i].parse::<f64>(), nc[i].parse::<f64>()) {
@@ -179,18 +225,33 @@ pub fn start_background_diff(
     old_version: String,
     new_version: String,
     sheet_name: String,
+    key_column: Option<String>,
 ) -> DiffSharedResult {
     let result = Arc::new(Mutex::new(None::<DiffResult>));
     let r2 = result.clone();
 
     std::thread::spawn(move || {
         log::info!("后台Diff线程启动: {old_version} vs {new_version}");
-        let old = load_csv_ci(&old_version, &sheet_name);
-        let new = load_csv_ci(&new_version, &sheet_name);
+        let key_ref = key_column.as_deref();
+        let old = load_csv_ci(&old_version, &sheet_name, key_ref);
+        let new = load_csv_ci(&new_version, &sheet_name, key_ref);
+
+        // 计算关键列在 values 中的索引（用于 compute_diff 只对比该列）
+        let key_idx: Option<usize> = match key_ref {
+            Some(kc) => match old.as_ref().ok().map(|(headers, _)| headers.iter().position(|h| h == kc)).flatten() {
+                Some(hi) => {
+                    let has_subrow = old.as_ref().ok().map(|(headers, _)| headers.get(1).map(|h| h == "Subrow").unwrap_or(false)).unwrap_or(false);
+                    let skip = if has_subrow { 2 } else { 1 };
+                    if hi >= skip { Some(hi - skip) } else { None }
+                }
+                None => None,
+            },
+            None => None,
+        };
 
         let diff_result = match (old, new) {
             (Ok((headers, old_map)), Ok((_, new_map))) => {
-                let diff_rows = compute_diff(&old_map, &new_map);
+                let diff_rows = compute_diff(&old_map, &new_map, key_idx);
                 log::info!("Diff完成: {} 行变更", diff_rows.len());
                 DiffResult { columns: headers, diff_rows, error: None }
             }
@@ -266,6 +327,10 @@ pub fn draw_diff_window(
             });
         });
         ui.separator();
+        // 仅筛选关键列变更：只对比 schema yml displayField 指定的列
+        ui.checkbox(&mut diff_state.filter_key_column, "仅筛选关键列变更")
+            .on_hover_text("只对比此数据表 displayField 指定的关键列是否有差异");
+        ui.separator();
         match status.as_str() {
             "comparing" => { ui.horizontal(|ui| { ui.spinner(); ui.label("正在对比中，请稍后……"); }); }
             "done" => { ui.label(format!("对比完成，共 {diff_count} 行变更")); }
@@ -276,7 +341,7 @@ pub fn draw_diff_window(
             if ui.button("取消对比").clicked() { close = true; }
             if status != "comparing" && ui.button("开始对比").clicked() {
                 if old_ver == new_ver { diff_state.status = "error:相同版本无法对比！".into(); }
-                else { action = Some(DiffAction::Compare { old: old_ver.clone(), new: new_ver.clone(), sheet: sheet_name.to_string() }); }
+                else { action = Some(DiffAction::Compare { old: old_ver.clone(), new: new_ver.clone(), sheet: sheet_name.to_string(), filter_key_column: diff_state.filter_key_column }); }
             }
         });
     });
@@ -288,7 +353,7 @@ pub fn draw_diff_window(
 }
 
 pub enum DiffAction {
-    Compare { old: String, new: String, sheet: String },
+    Compare { old: String, new: String, sheet: String, filter_key_column: bool },
 }
 
 pub fn draw_diff_table(

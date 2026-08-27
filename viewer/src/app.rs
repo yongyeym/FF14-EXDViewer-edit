@@ -1565,6 +1565,7 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                                     columns: Vec::new(),
                                     modal_icon_id: None,
                                     sheet: table.context().sheet().name().to_string(),
+                                    filter_key_column: false,
                                 };
                             }
 
@@ -1851,9 +1852,16 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                     &mut self.diff_state, ui, &sheet_name, &self.diff_result,
                 ) {
                     match action {
-                        crate::diff::DiffAction::Compare { old, new, sheet } => {
+                        crate::diff::DiffAction::Compare { old, new, sheet, filter_key_column } => {
                             self.diff_state.status = "comparing".into();
-                            self.diff_result = crate::diff::start_background_diff(old, new, sheet);
+                            // 仅筛选关键列变更：从当前数据表读取 displayField 关键列名
+                            let key_column = if filter_key_column {
+                                table.context().display_field_name()
+                            } else {
+                                None
+                            };
+                            self.diff_result =
+                                crate::diff::start_background_diff(old, new, sheet, key_column);
                         }
                     }
                 }

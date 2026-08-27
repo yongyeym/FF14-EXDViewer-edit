@@ -271,6 +271,17 @@ impl TableContext {
         self.0.display_column_idx.get()
     }
 
+    /// 返回 displayField 关键列的列名（来自 schema yml 的 displayField 项）。
+    /// 若该表未配置 displayField 则返回 None。
+    pub fn display_field_name(&self) -> Option<String> {
+        let idx = self.0.display_column_idx.get()?;
+        self.0
+            .schema_columns
+            .borrow()
+            .get(idx as usize)
+            .map(|sc| sc.name().to_string())
+    }
+
     /// Returns true if the column at the given index is an Icon type.
     pub fn is_icon_column(&self, column_idx: usize) -> bool {
         self.0
