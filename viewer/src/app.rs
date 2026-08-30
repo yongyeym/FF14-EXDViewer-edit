@@ -266,6 +266,8 @@ pub struct App {
 enum ExportConfirmKind {
     AllCsv,
     AllCsvSource,
+    AllCsvNoMisc,
+    AllCsvSourceNoMisc,
     AllMusic,
     AllMap,
     AllImages,
@@ -446,10 +448,16 @@ impl App {
             });
         match kind {
             ExportConfirmKind::AllCsv => {
-                self.command_export_all_csv(backend, lang, true, version);
+                self.command_export_all_csv(backend, lang, true, version, true);
             }
             ExportConfirmKind::AllCsvSource => {
-                self.command_export_all_csv(backend, lang, false, version);
+                self.command_export_all_csv(backend, lang, false, version, true);
+            }
+            ExportConfirmKind::AllCsvNoMisc => {
+                self.command_export_all_csv(backend, lang, true, version, false);
+            }
+            ExportConfirmKind::AllCsvSourceNoMisc => {
+                self.command_export_all_csv(backend, lang, false, version, false);
             }
             ExportConfirmKind::AllMusic => {
                 self.command_export_music(&backend, false);
@@ -834,6 +842,15 @@ impl App {
                     // Export menu in top bar
                     if self.backend.is_some() {
                         ui.menu_button("导出", |ui| {
+                            if ui.button("导出全部CSV（不含杂项表）").clicked() {
+                                self.export_confirm = Some(ExportConfirmKind::AllCsvNoMisc);
+                                ui.close();
+                            }
+                            if ui.button("导出全部CSV源文件（不含杂项表）").clicked() {
+                                self.export_confirm = Some(ExportConfirmKind::AllCsvSourceNoMisc);
+                                ui.close();
+                            }
+                            ui.separator();
                             if ui.button("导出全部CSV").clicked() {
                                 self.export_confirm = Some(ExportConfirmKind::AllCsv);
                                 ui.close();
@@ -1940,6 +1957,7 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                             lang,
                             resolve_display_field,
                             version,
+                            true,
                         );
                     }
                 }
@@ -3374,6 +3392,7 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
         lang: Language,
         resolve_display_field: bool,
         version: Option<GameVersion>,
+        include_misc: bool,
     ) {
         let export_base = std::env::current_exe()
             .ok()
@@ -3395,6 +3414,7 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
             .excel()
             .get_entries()
             .iter()
+            .filter(|(_, id)| include_misc || **id >= 0)
             .map(|(name, _)| name.clone())
             .collect();
         let total = sheets.len();
@@ -3403,7 +3423,7 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
         let progress = self.export_progress.clone();
         *progress.lock().unwrap() = Some(ExportProgress {
             active: true,
-            title: "导出全部CSV".into(),
+            title: if include_misc { "导出全部CSV".into() } else { "导出全部CSV（不含杂项表）".into() },
             current: 0,
             total,
             current_name: String::new(),
