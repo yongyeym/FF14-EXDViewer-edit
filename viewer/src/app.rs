@@ -1553,7 +1553,12 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                                 .on_hover_text("对比两个版本的数据差异")
                                 .clicked()
                             {
-                                let versions = crate::diff::find_version_folders();
+                                let table_name = table.context().sheet().name().to_string();
+                                // 仅列出当前数据表实际导出的 CSV 版本（不同表版本可能不同）
+                                let versions = crate::diff::find_version_folders()
+                                    .into_iter()
+                                    .filter(|v| crate::diff::has_csv_for_sheet(v, &table_name))
+                                    .collect::<Vec<_>>();
                                 let new_ver = versions.last().cloned().unwrap_or_default();
                                 let old_ver = if versions.len() > 1 { versions[versions.len() - 2].clone() } else { new_ver.clone() };
                                 self.diff_state = crate::diff::DiffState {
@@ -1564,8 +1569,9 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                                     diff_rows: Vec::new(),
                                     columns: Vec::new(),
                                     modal_icon_id: None,
-                                    sheet: table.context().sheet().name().to_string(),
+                                    sheet: table_name,
                                     filter_key_column: false,
+                                    show_new_only: true,
                                 };
                             }
 
@@ -1852,7 +1858,7 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                     &mut self.diff_state, ui, &sheet_name, &self.diff_result,
                 ) {
                     match action {
-                        crate::diff::DiffAction::Compare { old, new, sheet, filter_key_column } => {
+                        crate::diff::DiffAction::Compare { old, new, sheet, filter_key_column, show_new_only } => {
                             self.diff_state.status = "comparing".into();
                             // 仅筛选关键列变更：从当前数据表读取 displayField 关键列名
                             let key_column = if filter_key_column {
@@ -1860,8 +1866,13 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                             } else {
                                 None
                             };
-                            self.diff_result =
-                                crate::diff::start_background_diff(old, new, sheet, key_column);
+                            self.diff_result = crate::diff::start_background_diff(
+                                old,
+                                new,
+                                sheet,
+                                key_column,
+                                show_new_only,
+                            );
                         }
                     }
                 }

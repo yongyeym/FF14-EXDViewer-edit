@@ -19,6 +19,8 @@ pub struct DiffState {
     pub sheet: String,
     /// 仅筛选关键列变更（只对比 schema yml displayField 指定的列）
     pub filter_key_column: bool,
+    /// 仅显示修改后的数据（渲染diff表格时不显示旧csv数据，只显示新csv差异行）
+    pub show_new_only: bool,
 }
 
 #[derive(Clone)]
@@ -43,6 +45,7 @@ impl DiffState {
             modal_icon_id: None,
             sheet: String::new(),
             filter_key_column: false,
+            show_new_only: true,
         }
     }
 }
@@ -226,6 +229,7 @@ pub fn start_background_diff(
     new_version: String,
     sheet_name: String,
     key_column: Option<String>,
+    show_new_only: bool,
 ) -> DiffSharedResult {
     let result = Arc::new(Mutex::new(None::<DiffResult>));
     let r2 = result.clone();
@@ -251,7 +255,11 @@ pub fn start_background_diff(
 
         let diff_result = match (old, new) {
             (Ok((headers, old_map)), Ok((_, new_map))) => {
-                let diff_rows = compute_diff(&old_map, &new_map, key_idx);
+                let mut diff_rows = compute_diff(&old_map, &new_map, key_idx);
+                // 仅显示修改后的数据：只保留新csv侧（Added/新值）行，过滤旧csv（Deleted）行
+                if show_new_only {
+                    diff_rows.retain(|r| r.diff_type == DiffType::Added);
+                }
                 log::info!("Diff完成: {} 行变更", diff_rows.len());
                 DiffResult { columns: headers, diff_rows, error: None }
             }
@@ -330,6 +338,8 @@ pub fn draw_diff_window(
         // 仅筛选关键列变更：只对比 schema yml displayField 指定的列
         ui.checkbox(&mut diff_state.filter_key_column, "仅筛选关键列变更")
             .on_hover_text("只对比此数据表 displayField 指定的关键列是否有差异");
+        ui.checkbox(&mut diff_state.show_new_only, "仅显示修改后的数据")
+            .on_hover_text("只显示新csv中差异行的数据，不渲染旧csv数据");
         ui.separator();
         match status.as_str() {
             "comparing" => { ui.horizontal(|ui| { ui.spinner(); ui.label("正在对比中，请稍后……"); }); }
@@ -341,7 +351,7 @@ pub fn draw_diff_window(
             if ui.button("取消对比").clicked() { close = true; }
             if status != "comparing" && ui.button("开始对比").clicked() {
                 if old_ver == new_ver { diff_state.status = "error:相同版本无法对比！".into(); }
-                else { action = Some(DiffAction::Compare { old: old_ver.clone(), new: new_ver.clone(), sheet: sheet_name.to_string(), filter_key_column: diff_state.filter_key_column }); }
+                else { action = Some(DiffAction::Compare { old: old_ver.clone(), new: new_ver.clone(), sheet: sheet_name.to_string(), filter_key_column: diff_state.filter_key_column, show_new_only: diff_state.show_new_only }); }
             }
         });
     });
@@ -353,7 +363,7 @@ pub fn draw_diff_window(
 }
 
 pub enum DiffAction {
-    Compare { old: String, new: String, sheet: String, filter_key_column: bool },
+    Compare { old: String, new: String, sheet: String, filter_key_column: bool, show_new_only: bool },
 }
 
 pub fn draw_diff_table(
