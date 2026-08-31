@@ -369,6 +369,18 @@ fn csv_text_eq(a: &[u8], b: &[u8]) -> bool {
     normalize(a) == normalize(b)
 }
 
+/// 用系统默认程序打开文件（Windows 上用资源管理器触发默认关联程序）。
+#[cfg(not(target_arch = "wasm32"))]
+fn open_with_default_app(path: &std::path::Path) {
+    let _ = std::process::Command::new("explorer")
+        .arg(path.as_os_str())
+        .spawn();
+}
+
+/// 用系统默认程序打开文件（wasm 端无操作）。
+#[cfg(target_arch = "wasm32")]
+fn open_with_default_app(_path: &std::path::Path) {}
+
 fn create_router(ctx: egui::Context) -> Result<Router<App>> {
     let mut builder = Router::<App>::new(ctx);
     builder.set_title_formatter(|title| format!("{title} - FF14 EXDViewer edit"));
@@ -634,6 +646,8 @@ impl App {
                     let outcome = match compare_sheet_version_csvs(&old, &new, &export_base, &out_path) {
                         Ok((changed, new_only, old_only)) => {
                             let n = changed.len() + new_only.len() + old_only.len();
+                            // 用系统默认程序打开结果文件，方便直接查看
+                            open_with_default_app(&out_path);
                             format!("对比完成，共 {n} 个文件有差异，结果已保存: {}", out_path.display())
                         }
                         Err(e) => format!("error:{e}"),
@@ -706,6 +720,8 @@ impl App {
                             "数据表ID已导出: {} (普通表 {normal} 个, 杂项表 {misc} 个)",
                             out_path.display()
                         );
+                        // 用系统默认程序打开结果文件，方便直接查看
+                        open_with_default_app(&out_path);
                     }
                     Err(e) => log::error!("导出数据表ID失败: {e}"),
                 }
