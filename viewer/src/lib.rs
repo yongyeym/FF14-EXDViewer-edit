@@ -48,6 +48,7 @@ mod setup;
 mod sheet;
 mod shortcuts;
 pub mod stopwatch;
+pub mod summary_export;
 mod utils;
 #[cfg(target_arch = "wasm32")]
 pub mod worker;

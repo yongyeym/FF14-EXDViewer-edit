@@ -68,6 +68,14 @@ enum ExportAction {
     Favorites(bool),
 }
 
+/// 导出数据表内容Diff总结表的生成方式
+#[derive(Clone, PartialEq, Debug)]
+enum SummaryExportMode { Image, Excel }
+
+/// 导出数据表内容Diff总结表的个性化配置
+#[derive(Clone, PartialEq, Debug)]
+enum SummaryExportLayout { Full, Personalized }
+
 type CachedSheetPromise = TrackedPromise<Result<BaseSheet>>;
 type ConvertibleSheetPromise = ConvertiblePromise<CachedSheetPromise, Result<SheetTable>>;
 
@@ -266,6 +274,13 @@ pub struct App {
     sheet_diff_new: String,
     sheet_diff_status: String,
     sheet_diff_result: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+
+    // ── 导出数据表内容Diff总结表 ──
+    summary_export_open: bool,
+    summary_export_sheet: String,
+    summary_export_mode: SummaryExportMode,
+    summary_export_layout: SummaryExportLayout,
+    summary_export_has_personalized: bool,
 }
 
 /// 需要二次确认的批量导出类型
@@ -455,6 +470,7 @@ impl App {
         self.draw_logger(ui.ctx());
         self.draw_pr_window(ui.ctx());
         self.draw_sheet_diff_window(ui.ctx());
+        self.draw_summary_export_window(ui.ctx());
         self.draw_export_confirm_window(ui.ctx());
         self.draw_export_progress_window(ui.ctx());
         self.poll_list_promise();
@@ -500,8 +516,196 @@ impl App {
         self.router.get().unwrap().replace(path).unwrap();
     }
 
-    /// 批量导出二次确认弹窗
-    fn draw_export_confirm_window(&mut self, ctx: &egui::Context) {
+        /// 「数据」菜单：导出数据表内容Diff总结表 —— 配置窗口
+        fn draw_summary_export_window(&mut self, ctx: &egui::Context) {
+            if !self.summary_export_open {
+                return;
+            }
+            let mut close = false;
+            let mut start = false;
+            let sheet_name = self.summary_export_sheet.clone();
+            let has_personalized = self.summary_export_has_personalized;
+            // 若表无个性化配置，强制使用"完整表数据"
+            if !has_personalized && self.summary_export_layout == SummaryExportLayout::Personalized {
+                self.summary_export_layout = SummaryExportLayout::Full;
+            }
+            egui::Window::new("导出数据表内容Diff总结表")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .default_size([420.0, 210.0])
+                .show(ctx, |ui| {
+                    ui.set_width(400.0);
+                    ui.label(format!("当前选中的数据表为：{sheet_name}"));
+                    ui.add_space(8.0);
+                    // 生成方式
+                    ui.label("生成方式：");
+                    ui.horizontal(|ui| {
+                        ui.radio_value(
+                            &mut self.summary_export_mode,
+                            SummaryExportMode::Image,
+                            "图片",
+                        );
+                        ui.radio_value(
+                            &mut self.summary_export_mode,
+                            SummaryExportMode::Excel,
+                            "Excel表",
+                        );
+                    });
+                    ui.add_space(6.0);
+                    // 个性化配置
+                    ui.label("个性化配置：");
+                    ui.horizontal(|ui| {
+                        ui.radio_value(
+                            &mut self.summary_export_layout,
+                            SummaryExportLayout::Full,
+                            "完整表数据",
+                        );
+                        ui.add_enabled_ui(has_personalized, |ui| {
+                            ui.radio_value(
+                                &mut self.summary_export_layout,
+                                SummaryExportLayout::Personalized,
+                                "个性化表数据",
+                            );
+                        });
+                        if !has_personalized {
+                            ui.label(RichText::new("（此表未配置个性化数据）").weak().small());
+                        }
+                    });
+                    ui.add_space(10.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("开始生成").clicked() {
+                            start = true;
+                        }
+                        if ui.button("取消").clicked() {
+                            close = true;
+                        }
+                    });
+                });
+            if close {
+                self.summary_export_open = false;
+            }
+            if start {
+                self.summary_export_open = false;
+                log::info!("开始导出数据表内容Diff总结表: {} mode={:?} layout={:?}",
+                    sheet_name, self.summary_export_mode, self.summary_export_layout);
+                self.start_summary_export(
+                    ctx,
+                    sheet_name,
+                    self.summary_export_mode.clone(),
+                    self.summary_export_layout.clone(),
+                );
+            }
+        }
+
+
+    /// 导出数据表内容Diff总结表：收集数据并调用第三方工具生成 Excel/图片
+    fn start_summary_export(
+        &mut self,
+        ctx: &egui::Context,
+        sheet_name: String,
+        mode: SummaryExportMode,
+        layout: SummaryExportLayout,
+    ) {
+        let Some(backend) = self.backend.clone() else {
+            return;
+        };
+        let lang = LANGUAGE.get(ctx);
+        let hires = ALWAYS_HIRES.get(ctx);
+        let resolve_df = DISPLAY_FIELD_SHOWN.get(ctx);
+
+        let filter_keys = if self.diff_state.active
+            && self.diff_state.status == "done"
+            && self.diff_state.sheet == sheet_name
+        {
+            Some(
+                self.diff_state
+                    .diff_rows
+                    .iter()
+                    .map(|r| r.row_key.clone())
+                    .collect::<Vec<_>>(),
+            )
+        } else {
+            None
+        };
+
+        let out_dir = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|p| p.join("export").join("result")))
+            .unwrap_or_else(|| std::path::PathBuf::from("export/result"));
+        let _ = std::fs::create_dir_all(&out_dir);
+
+        let s_mode = if mode == SummaryExportMode::Excel {
+            crate::summary_export::SummaryMode::Excel
+        } else {
+            crate::summary_export::SummaryMode::Image
+        };
+        let s_layout = if layout == SummaryExportLayout::Personalized {
+            crate::summary_export::SummaryLayout::Personalized
+        } else {
+            crate::summary_export::SummaryLayout::Full
+        };
+
+        let progress = self.export_progress.clone();
+        *progress.lock().unwrap() = Some(ExportProgress {
+            active: true,
+            title: "导出数据表内容Diff总结表".into(),
+            current: 0,
+            total: 0,
+            current_name: sheet_name.clone(),
+            done: false,
+            error: None,
+            done_at: None,
+            cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        });
+
+        self.export_promise = Some(TrackedPromise::spawn_local(async move {
+            let mut ok = true;
+            let mut page = 0;
+            loop {
+                match crate::summary_export::generate_page(
+                    backend.clone(),
+                    &sheet_name,
+                    lang,
+                    hires,
+                    resolve_df,
+                    s_mode,
+                    s_layout,
+                    &out_dir,
+                    page,
+                    filter_keys.as_ref(),
+                )
+                .await
+                {
+                    Ok((path, total_pages)) => {
+                        log::info!("总结表生成: {}", path.display());
+                        open_with_default_app(&path);
+                        if page + 1 >= total_pages {
+                            break;
+                        }
+                        page += 1;
+                    }
+                    Err(e) => {
+                        log::error!("总结表生成失败(page {page}): {e}");
+                        ok = false;
+                        break;
+                    }
+                }
+                if s_mode == crate::summary_export::SummaryMode::Excel {
+                    break;
+                }
+            }
+            if let Some(p) = progress.lock().unwrap().as_mut() {
+                p.done = true;
+                p.active = false;
+                if !ok {
+                    p.error = Some("生成失败".into());
+                }
+            }
+        }));
+    }
+        /// 批量导出二次确认弹窗
+        fn draw_export_confirm_window(&mut self, ctx: &egui::Context) {
         if self.export_confirm.is_none() {
             return;
         }
@@ -1129,11 +1333,19 @@ impl App {
                                 };
                                 ui.close();
                             }
-                            if ui.button("导出当前数据表内容Diff总结表")
-                                .on_hover_text("功能开发中")
-                                .clicked()
-                            {
-                                log::warn!("「导出当前数据表内容Diff总结表」功能尚未实现");
+                            if ui.button("导出当前数据表内容Diff总结表").clicked() {
+                                let sheet_name = SELECTED_SHEET.get(ctx).unwrap_or_default();
+                                let layout = crate::column_layout::load_column_layout();
+                                self.summary_export_has_personalized = crate::column_layout::get_sheet_columns(&layout, &sheet_name)
+                                    .map(|cols| !cols.is_empty())
+                                    .unwrap_or(false);
+                                if !self.summary_export_has_personalized {
+                                    self.summary_export_layout = SummaryExportLayout::Full;
+                                } else {
+                                    self.summary_export_layout = SummaryExportLayout::Personalized;
+                                }
+                                self.summary_export_sheet = sheet_name;
+                                self.summary_export_open = true;
                                 ui.close();
                             }
                         });
@@ -3926,6 +4138,11 @@ impl App {
             sheet_diff_new: String::new(),
             sheet_diff_status: "idle".into(),
             sheet_diff_result: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            summary_export_open: false,
+            summary_export_sheet: String::new(),
+            summary_export_mode: SummaryExportMode::Image,
+            summary_export_layout: SummaryExportLayout::Personalized,
+            summary_export_has_personalized: false,
         }
     }
 
