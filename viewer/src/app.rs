@@ -259,6 +259,13 @@ pub struct App {
     delete_csv_done_at: Option<std::time::Instant>,
     /// 待二次确认的批量导出（是→执行，否→取消）
     export_confirm: Option<ExportConfirmKind>,
+
+    // ── 数据菜单：找出版本变更的数据表 ──
+    sheet_diff_active: bool,
+    sheet_diff_old: String,
+    sheet_diff_new: String,
+    sheet_diff_status: String,
+    sheet_diff_result: std::sync::Arc<std::sync::Mutex<Option<String>>>,
 }
 
 /// 需要二次确认的批量导出类型
@@ -271,6 +278,95 @@ enum ExportConfirmKind {
     AllMusic,
     AllMap,
     AllImages,
+    /// 导出数据表ID（exd/root.exl）
+    MiscSheets,
+}
+
+/// 对比两个版本目录下的所有 CSV 文件（仅文本内容差异），写四部分总结到 out_path。
+/// 返回 `(有变更文件, 新版本独有, 旧版本独有)`。
+fn compare_sheet_version_csvs(
+    old_ver: &str,
+    new_ver: &str,
+    export_base: &std::path::Path,
+    out_path: &std::path::Path,
+) -> Result<(Vec<String>, Vec<String>, Vec<String>), String> {
+    let old_dir = export_base.join(old_ver);
+    let new_dir = export_base.join(new_ver);
+    let read_names =
+        |dir: &std::path::Path| -> Result<Vec<String>, String> {
+            let mut v = Vec::new();
+            for e in std::fs::read_dir(dir).map_err(|e| format!("读取目录 {} 失败: {e}", dir.display()))? {
+                let e = e.map_err(|e| e.to_string())?;
+                let name = e.file_name().into_string().map_err(|_| "文件名非UTF-8".to_string())?;
+                if name.to_ascii_lowercase().ends_with(".csv") {
+                    v.push(name);
+                }
+            }
+            v.sort();
+            Ok(v)
+        };
+    let old_files = read_names(&old_dir)?;
+    let new_files = read_names(&new_dir)?;
+    let old_set: std::collections::HashSet<&String> = old_files.iter().collect();
+    let new_set: std::collections::HashSet<&String> = new_files.iter().collect();
+
+    let mut changed = Vec::new();
+    for name in old_files.iter().filter(|n| new_set.contains(*n)) {
+        let a = std::fs::read(old_dir.join(name)).map_err(|e| e.to_string())?;
+        let b = std::fs::read(new_dir.join(name)).map_err(|e| e.to_string())?;
+        if !csv_text_eq(&a, &b) {
+            changed.push(name.clone());
+        }
+    }
+    let new_only: Vec<String> = new_files.iter().filter(|n| !old_set.contains(*n)).cloned().collect();
+    let old_only: Vec<String> = old_files.iter().filter(|n| !new_set.contains(*n)).cloned().collect();
+
+    let mut out = String::new();
+    out.push_str(&format!("对比版本: 旧版本 {old_ver}  vs  新版本 {new_ver}\n\n"));
+    out.push_str(&format!(
+        "===== 有内容变更的CSV文件（共 {} 个）=====\n",
+        changed.len()
+    ));
+    for n in &changed {
+        out.push_str(&format!("{n}\n"));
+    }
+    out.push_str(&format!(
+        "\n===== 新版本存在但旧版本不存在的CSV（共 {} 个）=====\n",
+        new_only.len()
+    ));
+    for n in &new_only {
+        out.push_str(&format!("{n}\n"));
+    }
+    out.push_str(&format!(
+        "\n===== 旧版本存在但新版本不存在的CSV（共 {} 个）=====\n",
+        old_only.len()
+    ));
+    for n in &old_only {
+        out.push_str(&format!("{n}\n"));
+    }
+    std::fs::write(out_path, &out).map_err(|e| format!("写入 {} 失败: {e}", out_path.display()))?;
+
+    Ok((changed, new_only, old_only))
+}
+
+/// CSV 文本内容比较：忽略 BOM，统一换行（CRLF 视为 LF）。
+fn csv_text_eq(a: &[u8], b: &[u8]) -> bool {
+    fn normalize(raw: &[u8]) -> Vec<u8> {
+        let s = if raw.starts_with(b"\xef\xbb\xbf") { &raw[3..] } else { raw };
+        let mut out = Vec::with_capacity(s.len());
+        let mut i = 0;
+        while i < s.len() {
+            if s[i] == b'\r' && i + 1 < s.len() && s[i + 1] == b'\n' {
+                out.push(b'\n');
+                i += 2;
+            } else {
+                out.push(s[i]);
+                i += 1;
+            }
+        }
+        out
+    }
+    normalize(a) == normalize(b)
 }
 
 fn create_router(ctx: egui::Context) -> Result<Router<App>> {
@@ -346,6 +442,7 @@ impl App {
         self.draw_menubar(ui, on_music, on_maps, on_icons, on_assets);
         self.draw_logger(ui.ctx());
         self.draw_pr_window(ui.ctx());
+        self.draw_sheet_diff_window(ui.ctx());
         self.draw_export_confirm_window(ui.ctx());
         self.draw_export_progress_window(ui.ctx());
         self.poll_list_promise();
@@ -404,9 +501,13 @@ impl App {
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
                 ui.set_width(420.0);
-                ui.label(
-                    "导出全部文件耗时较长，本程序可能会长时间无响应或运行卡顿，建议您在导出过程中不要运行FF14游戏。是否确认开始导出？",
-                );
+                let text = match &self.export_confirm {
+                    Some(ExportConfirmKind::MiscSheets) => {
+                        "将从本地游戏文件exd/root.exl中导出游戏数据表ID记录，并导出为程序目录/export/misc_sheets_[当前版本号].txt。是否确定导出？"
+                    }
+                    _ => "导出全部文件耗时较长，本程序可能会长时间无响应或运行卡顿，建议您在导出过程中不要运行FF14游戏。是否确认开始导出？",
+                };
+                ui.label(text);
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     if ui.button("是").clicked() {
@@ -424,6 +525,124 @@ impl App {
                 && let Some(kind) = kind
             {
                 self.run_export_confirmed(ctx, kind);
+            }
+        }
+    }
+
+    /// 「数据」菜单：找出版本变更的数据表 —— 版本选择 + 后台对比窗口
+    fn draw_sheet_diff_window(&mut self, ctx: &egui::Context) {
+        if !self.sheet_diff_active {
+            return;
+        }
+        // 轮询后台对比结果
+        if self.sheet_diff_status == "comparing" {
+            if let Ok(mut lock) = self.sheet_diff_result.lock() {
+                if let Some(outcome) = lock.take() {
+                    self.sheet_diff_status = outcome;
+                }
+            }
+        }
+        let versions = crate::diff::find_version_folders();
+        let mut close = false;
+        let mut start = false;
+        let mut old_ver = self.sheet_diff_old.clone();
+        let mut new_ver = self.sheet_diff_new.clone();
+        let status = self.sheet_diff_status.clone();
+
+        egui::Window::new("找出版本变更的数据表")
+            .id("sheet_diff_window".into())
+            .collapsible(false)
+            .resizable(false)
+            .default_size([470.0, 220.0])
+            .show(ctx, |ui| {
+                ui.set_width(450.0);
+                ui.label(
+                    "将对比选择的两个版本号对应本地CSV文件，确定是否有文件内容变更，将有变更的表格名称列出并保存到程序目录/export/diff_sheets.txt",
+                );
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    ui.label("旧版本:");
+                    egui::ComboBox::from_id_salt("sheet_diff_old")
+                        .selected_text(&old_ver)
+                        .show_ui(ui, |ui| {
+                            for opt in &versions {
+                                ui.selectable_value(&mut old_ver, opt.clone(), opt.as_str());
+                            }
+                        });
+                });
+                ui.horizontal(|ui| {
+                    ui.label("新版本:");
+                    egui::ComboBox::from_id_salt("sheet_diff_new")
+                        .selected_text(&new_ver)
+                        .show_ui(ui, |ui| {
+                            for opt in &versions {
+                                ui.selectable_value(&mut new_ver, opt.clone(), opt.as_str());
+                            }
+                        });
+                });
+                ui.separator();
+                match status.as_str() {
+                    "comparing" => {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label("正在对比两个版本csv文件内容，请稍后……");
+                        });
+                    }
+                    s if s.starts_with("error:") => {
+                        ui.colored_label(egui::Color32::RED, &s[6..]);
+                    }
+                    s if !s.is_empty() && s != "selecting" && s != "idle" => {
+                        ui.colored_label(egui::Color32::GREEN, s);
+                    }
+                    _ => {}
+                }
+                ui.horizontal(|ui| {
+                    if ui.button("关闭").clicked() {
+                        close = true;
+                    }
+                    if status != "comparing" && ui.button("开始查询文件差异").clicked() {
+                        start = true;
+                    }
+                });
+            });
+
+        if close {
+            self.sheet_diff_active = false;
+            self.sheet_diff_status = "idle".into();
+            return;
+        }
+        self.sheet_diff_old = old_ver;
+        self.sheet_diff_new = new_ver;
+        if start {
+            if self.sheet_diff_old == self.sheet_diff_new {
+                self.sheet_diff_status = "error:相同版本无法对比！".into();
+            } else {
+                self.sheet_diff_status = "comparing".into();
+                let old = self.sheet_diff_old.clone();
+                let new = self.sheet_diff_new.clone();
+                let result = self.sheet_diff_result.clone();
+                std::thread::spawn(move || {
+                    let export_base = std::env::current_exe()
+                        .ok()
+                        .and_then(|p| p.parent().map(|p| p.join("export").join("data")))
+                        .unwrap_or_else(|| std::path::PathBuf::from("export/data"));
+                    let export_dir = export_base
+                        .parent()
+                        .map(|p| p.to_path_buf())
+                        .unwrap_or_else(|| std::path::PathBuf::from("export"));
+                    let out_path = export_dir.join(format!("diff_sheets_{old}_{new}.txt"));
+                    let outcome = match compare_sheet_version_csvs(&old, &new, &export_base, &out_path) {
+                        Ok((changed, new_only, old_only)) => {
+                            let n = changed.len() + new_only.len() + old_only.len();
+                            format!("对比完成，共 {n} 个文件有差异，结果已保存: {}", out_path.display())
+                        }
+                        Err(e) => format!("error:{e}"),
+                    };
+                    match result.lock() {
+                        Ok(mut lock) => *lock = Some(outcome),
+                        Err(e) => log::error!("sheet_diff Mutex损坏: {e}"),
+                    }
+                });
             }
         }
     }
@@ -458,6 +677,38 @@ impl App {
             }
             ExportConfirmKind::AllCsvSourceNoMisc => {
                 self.command_export_all_csv(backend, lang, false, version, false);
+            }
+            ExportConfirmKind::MiscSheets => {
+                // 导出数据表ID：从本地游戏 sqpack 读 exd/root.exl，输出 export/misc_sheets_[版本].txt
+                let sqpack_dir = BACKEND_CONFIG.get(ctx).and_then(|config| {
+                    if let InstallLocation::Sqpack(dir) = &config.location {
+                        Some(dir.clone())
+                    } else {
+                        None
+                    }
+                });
+                let Some(sqpack_dir) = sqpack_dir else {
+                    log::error!("导出数据表ID需要本地游戏目录配置(InstallLocation::Sqpack)");
+                    return;
+                };
+                let export_dir = std::env::current_exe()
+                    .ok()
+                    .and_then(|p| p.parent().map(|p| p.join("export")))
+                    .unwrap_or_else(|| std::path::PathBuf::from("export"));
+                let _ = std::fs::create_dir_all(&export_dir);
+                let ver = version
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "local".to_string());
+                let out_path = export_dir.join(format!("misc_sheets_{ver}.txt"));
+                match crate::misc_sheets::export_misc_sheets(&sqpack_dir, &out_path) {
+                    Ok((normal, misc)) => {
+                        log::info!(
+                            "数据表ID已导出: {} (普通表 {normal} 个, 杂项表 {misc} 个)",
+                            out_path.display()
+                        );
+                    }
+                    Err(e) => log::error!("导出数据表ID失败: {e}"),
+                }
             }
             ExportConfirmKind::AllMusic => {
                 self.command_export_music(&backend, false);
@@ -834,6 +1085,38 @@ impl App {
                                     .unwrap_or_else(|| crate::downloader::DEFAULT_HCA_DECODER_URL.to_string());
                                 let status = self.download_hca_status.clone();
                                 crate::downloader::start_download_hca(&url, status);
+                                ui.close();
+                            }
+                        });
+                    }
+
+                    // 数据菜单（下载与导出之间）
+                    if self.backend.is_some() {
+                        ui.menu_button("数据", |ui| {
+                            if ui.button("导出数据表ID（exd/root.exl）").on_hover_text("从本地游戏文件exd/root.exl导出数据表ID记录").clicked() {
+                                self.export_confirm = Some(ExportConfirmKind::MiscSheets);
+                                ui.close();
+                            }
+                            if ui.button("找出版本变更的数据表")
+                                .on_hover_text("对比本地两个版本csv文件内容，列出有变更的数据表")
+                                .clicked()
+                            {
+                                let versions = crate::diff::find_version_folders();
+                                self.sheet_diff_active = true;
+                                self.sheet_diff_status = "selecting".into();
+                                self.sheet_diff_new = versions.last().cloned().unwrap_or_default();
+                                self.sheet_diff_old = if versions.len() > 1 {
+                                    versions[versions.len() - 2].clone()
+                                } else {
+                                    self.sheet_diff_new.clone()
+                                };
+                                ui.close();
+                            }
+                            if ui.button("导出当前数据表内容Diff总结表")
+                                .on_hover_text("功能开发中")
+                                .clicked()
+                            {
+                                log::warn!("「导出当前数据表内容Diff总结表」功能尚未实现");
                                 ui.close();
                             }
                         });
@@ -3621,6 +3904,11 @@ impl App {
             delete_csv_confirming: false,
             delete_csv_done_at: None,
             export_confirm: None,
+            sheet_diff_active: false,
+            sheet_diff_old: String::new(),
+            sheet_diff_new: String::new(),
+            sheet_diff_status: "idle".into(),
+            sheet_diff_result: std::sync::Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
