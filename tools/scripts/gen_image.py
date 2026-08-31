@@ -1,12 +1,12 @@
-"""FF14 EXDViewer 数据表内容Diff总结表 - 图片生成工具（PIL 绘制表格，嵌入图标缩略图）。
+"""FF14 EXDViewer 数据表内容Diff总结表 - 图片生成工具（PIL 绘制，自适应表格，嵌入图标）。
 用法: gen_image_tool.exe <json> <out.png>
-不依赖本地 python（PyInstaller 打包），使用 Pillow 库绘制。
+不依赖本地 python（PyInstaller 打包）。图标列只显示缩略图（不含原始id），标题置顶，
+列宽/行高按内容自适应，单元格内容居中。
 """
 import json, sys, os
 from PIL import Image, ImageDraw, ImageFont
 
 def load_font(size):
-    # Windows 常见中文字体回退
     for name in ['msyh.ttc', 'simhei.ttf', 'simsun.ttc', 'arial.ttf']:
         try:
             return ImageFont.truetype(name, size)
@@ -14,73 +14,146 @@ def load_font(size):
             continue
     return ImageFont.load_default()
 
+def te(d, s, f):
+    try:
+        return d.textlength(str(s), font=f)
+    except Exception:
+        return len(str(s)) * 8
+
+def wrap_centered(d, box, text, font, color=(20, 20, 20)):
+    x0, y0, x1, y1 = box
+    w = x1 - x0
+    text = str(text)
+    if not text:
+        return
+    words = text
+    # 按字符换行
+    lines = []
+    cur = ''
+    for ch in words:
+        if te(d, cur + ch, font) <= w - 12:
+            cur += ch
+        else:
+            if cur:
+                lines.append(cur)
+            cur = ch
+    if cur:
+        lines.append(cur)
+    lh = te(d, 'Ag', font)
+    total_h = len(lines) * lh
+    y = (y0 + y1) / 2 - total_h / 2
+    for ln in lines:
+        lw = te(d, ln, font)
+        d.text(((x0 + x1) / 2 - lw / 2, y), ln, fill=color, font=font)
+        y += lh
+
 def main():
     data = json.load(open(sys.argv[1], encoding='utf-8'))
     out = sys.argv[2]
     cols = data['columns']
     rows = data['rows']
-
-    header_h = 36
-    row_h = 30
     pad = 6
-    # 列宽：第1列 Row，其余按是否图片列
-    widths = [90] + [46 if c.get('is_icon') else 150 for c in cols]
-    ncols = len(widths)
+    header_h = 36
+    row_h_base = 30
+    MIN_ICON = 40
+    font = load_font(13)
+    font_s = load_font(11)
 
-    W = sum(widths) + pad * (ncols + 1)
-    H = header_h + row_h * len(rows) + pad * (len(rows) + 1) + 30
+    header = ['Row'] + [c['name'] for c in cols]
 
+    # 预解析行内容 / 图标
+    rows_dec = []
+    for row in rows:
+        texts = []
+        icons = []
+        for ci, cell in enumerate(row['cells']):
+            if isinstance(cell, dict) and 'value' in cell:
+                texts.append(cell['value']); icons.append(None)
+            else:
+                texts.append(''); icons.append((cell or {}).get('icon_path'))
+        rows_dec.append((row['row'], texts, icons))
+
+    # 列宽自适应
+    widths = [max(60, te(d, header[0], font) + 16)]
+    for ci in range(len(cols)):
+        mx = te(d, header[ci + 1], font) + 16
+        for (_, texts, icons) in rows_dec:
+            if ci < len(texts) and texts[ci]:
+                mx = max(mx, te(d, texts[ci], font) + 16)
+            if ci < len(icons) and icons[ci] and os.path.exists(icons[ci]):
+                pass
+        mx = max(MIN_ICON if cols[ci].get('is_icon') else 0, mx)
+        widths.append(mx)
+
+    # 行高自适应（文本换行 + 图标）
+    row_heights = []
+    for (rid, texts, icons) in rows_dec:
+        h = row_h_base
+        # 图标行高：至少 40px 或图片实际高度
+        for ci in range(len(cols)):
+            if ci < len(icons) and icons[ci] and os.path.exists(icons[ci]):
+                try:
+                    ih = Image.open(icons[ci]).height
+                    h = max(h, max(MIN_ICON, ih) + 8)
+                except Exception:
+                    pass
+            if ci < len(texts) and texts[ci]:
+                # 该列可用宽内可放字符数
+                avail = widths[ci + 1] - 12
+                cw = te(d, 'x', font_s) or 1
+                chars_per_line = max(1, int(avail / cw))
+                lines = max(1, -(-len(str(texts[ci])) // chars_per_line))
+                h = max(h, lines * (te(d, 'Ag', font_s) + 4) + 8)
+        row_heights.append(h)
+
+    W = sum(widths) + pad * (len(widths) + 1)
+    H = pad + 26 + header_h + pad + sum(row_heights) + pad * len(rows) + pad
     img = Image.new('RGB', (W, H), 'white')
     d = ImageDraw.Draw(img)
-    font = load_font(13)
-    font_b = load_font(13)
 
-    def draw_cell(x, y, w, h, text, fill=None, font=None, anchor='lm'):
-        d.rectangle([x, y, x + w, y + h], fill=fill or 'white', outline=(200, 200, 200))
-        d.text((x + 6, y + h / 2), str(text), fill=(20, 20, 20), font=font or load_font(11), anchor=anchor or 'lm')
-
-    # 表头
-    base_x = pad
-    base_y = pad
-    hdr = ['Row'] + [c['name'] for c in cols]
-    for ci, w in enumerate(widths):
-        x = base_x + sum(widths[:ci]) + pad * ci
-        d.rectangle([x, base_y, x + w, base_y + header_h], fill=(40, 90, 160))
-        d.text((x + 6, base_y + header_h / 2), str(hdr[ci]), fill='white', font=font, anchor='lm')
-
-    # 行
-    for ri, row in enumerate(rows):
-        y = base_y + header_h + pad + ri * (row_h + pad)
-        cells = row['cells']
-        # Row 列
-        draw_cell(base_x, y, widths[0], row_h, row['row'], fill=(245, 248, 252), font=load_font(11))
-        for ci in range(len(cols)):
-            x = base_x + sum(widths[:ci + 1]) + pad * (ci + 1)
-            cell = cells[ci] if ci < len(cells) else {}
-            w = widths[ci + 1]
-            icon_path = cell.get('icon_path') if isinstance(cell, dict) else None
-            if icon_path and os.path.exists(icon_path):
-                # 图标列：显示缩略图 + id
-                draw_cell(x, y, w, row_h, '', fill=(255, 255, 238), font=load_font(11))
-                try:
-                    icon = Image.open(icon_path).convert('RGBA')
-                    icon.thumbnail((w - 8, row_h - 8))
-                    ox = x + (w - icon.width) // 2
-                    oy = y + (row_h - icon.height) // 2
-                    img.paste(icon, (ox, oy), icon)
-                    d.text((x + w / 2, y + row_h - 7), str(cell.get('id', '')), fill=(120, 120, 120),
-                           font=load_font(8), anchor='mb')
-                except Exception:
-                    d.text((x + 6, y + row_h / 2), str(cell.get('id', '')), fill=(20, 20, 20), font=load_font(11), anchor='lm')
-            else:
-                txt = cell.get('value', '') if isinstance(cell, dict) else ''
-                draw_cell(x, y, w, row_h, txt, font=load_font(11))
-
-    # 标题
     title = data['sheet_name']
     if data['total_pages'] > 1:
         title += f"  (第 {data['page'] + 1}/{data['total_pages']} 页)"
-    d.text((pad, base_y + header_h + pad + len(rows) * (row_h + pad) + 6), title, fill=(40, 90, 160), font=load_font(14))
+    # 标题置顶
+    d.text((pad + 2, pad), title, fill=(40, 90, 160), font=load_font(15))
+    y = pad + 26
+
+    # 表头
+    x = pad
+    for ci, w in enumerate(widths):
+        d.rectangle([x, y, x + w, y + header_h], fill=(40, 90, 160))
+        d.text((x + w / 2, y + header_h / 2), str(header[ci]), fill='white', font=font, anchor='mm')
+        x += w + pad
+    y += header_h + pad
+
+    # 行
+    for ri, (rid, texts, icons) in enumerate(rows_dec):
+        h = row_heights[ri]
+        x = pad
+        # Row 列（居中）
+        d.rectangle([x, y, x + widths[0], y + h], fill=(245, 248, 252), outline=(200, 200, 200))
+        d.text((x + widths[0] / 2, y + h / 2), str(rid), fill=(20, 20, 20), font=font_s, anchor='mm')
+        x += widths[0] + pad
+        for ci in range(len(cols)):
+            w = widths[ci + 1]
+            icon = icons[ci] if ci < len(icons) else None
+            is_icon_col = cols[ci].get('is_icon')
+            if is_icon_col and icon and os.path.exists(icon):
+                d.rectangle([x, y, x + w, y + h], fill=(255, 255, 238), outline=(200, 200, 200))
+                try:
+                    im = Image.open(icon).convert('RGBA')
+                    im.thumbnail((max(MIN_ICON, w - 8), max(MIN_ICON, h - 8)))
+                    ox = x + (w - im.width) // 2
+                    oy = y + (h - im.height) // 2
+                    img.paste(im, (ox, oy), im)
+                except Exception:
+                    pass
+            else:
+                txt = texts[ci] if ci < len(texts) else ''
+                d.rectangle([x, y, x + w, y + h], fill='white', outline=(200, 200, 200))
+                wrap_centered(d, (x, y, x + w, y + h), txt, font_s)
+            x += w + pad
+        y += h + pad
 
     img.save(out)
     print("saved", out)
