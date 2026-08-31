@@ -124,7 +124,7 @@ pub async fn generate_page(
     }
 
     // Image 模式分页：每页 MAX_ROWS_PER_PAGE 行
-    const MAX_ROWS_PER_PAGE: usize = 60;
+    const MAX_ROWS_PER_PAGE: usize = 200;
     let total_pages = if mode == SummaryMode::Image {
         row_keys.len().div_ceil(MAX_ROWS_PER_PAGE).max(1)
     } else {
@@ -164,7 +164,9 @@ pub async fn generate_page(
             .map_err(|e| anyhow::anyhow!("读取行 {row_id} 失败: {e}"))?;
         let mut cells = Vec::new();
         for (_, is_icon_col, col_idx) in &cols {
-            let cell = context.cell_by_index(row, *col_idx as u32)?;
+            // columns() 按 offset 索引返回，因此用 cell_by_offset（而非依赖列顺序索引的 cell_by_index），
+            // 否则会产生列错位（图片列被填入下一列数据）。
+            let cell = context.cell_by_offset(row, *col_idx as u32)?;
             let value = cell.read(resolve_display_field)?;
             if *is_icon_col {
                 if let crate::sheet::cell::CellValue::Icon(icon_id) = value {
