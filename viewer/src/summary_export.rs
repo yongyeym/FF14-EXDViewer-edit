@@ -238,141 +238,45 @@ pub async fn generate_page(
     let out_path = out_base.join(&out_name);
 
     if mode == SummaryMode::Excel {
-        run_python(EXCEL_SCRIPT, &json_path, &out_path)?;
+        run_tool("gen_excel_tool.exe", &json_path, &out_path, "Excel")?;
     } else {
-        run_python(IMAGE_SCRIPT, &json_path, &out_path)?;
+        run_tool("gen_image_tool.exe", &json_path, &out_path, "图片")?;
     }
 
     let _ = std::fs::remove_file(&json_path);
     Ok((out_path, total_pages))
 }
 
-/// 把脚本写到临时文件并调用系统 python（matplotlib/openpyxl 为第三方开源库）。
+/// 调用打包的独立工具 exe（程序目录/tools/ 下，PyInstaller 打包，不依赖本地 python）。
 #[cfg(not(target_arch = "wasm32"))]
-fn run_python(script: &str, json_path: &Path, out_path: &Path) -> anyhow::Result<()> {
-    let script_path = std::env::temp_dir().join("exdviewer_summary_gen.py");
-    std::fs::write(&script_path, script)?;
-    let status = std::process::Command::new("python")
-        .arg(&script_path)
+fn run_tool(tool_name: &str, json_path: &Path, out_path: &Path, kind: &str) -> anyhow::Result<()> {
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let tool = exe_dir.join("tools").join(tool_name);
+    if !tool.exists() {
+        anyhow::bail!(
+            "找不到生成{kind}的工具: {}。请将 {tool_name} 放入程序目录 tools/ 文件夹下。",
+            tool.display()
+        );
+    }
+    let status = std::process::Command::new(&tool)
         .arg(json_path)
         .arg(out_path)
         .status()?;
     if !status.success() {
-        anyhow::bail!("Python 生成失败（exit {:?}），请确认已安装 openpyxl/matplotlib", status.code());
+        anyhow::bail!("生成{kind}失败（exit {:?}），请查看工具报错", status.code());
     }
     Ok(())
 }
 
 #[cfg(target_arch = "wasm32")]
-fn run_python(_script: &str, _json_path: &Path, _out_path: &Path) -> anyhow::Result<()> {
+fn run_tool(_tool_name: &str, _json_path: &Path, _out_path: &Path, _kind: &str) -> anyhow::Result<()> {
     anyhow::bail!("web 端不支持生成 Excel/图片总结表");
 }
 
-/// 生成 Excel 的 Python 脚本（openpyxl 第三方开源库）。
-const EXCEL_SCRIPT: &str = r#"
-import json, sys, os
-from openpyxl import Workbook
-from openpyxl.drawing.image import Image as XLImage
-from openpyxl.utils import get_column_letter
 
-def main():
-    data = json.load(open(sys.argv[1], encoding='utf-8'))
-    out = sys.argv[2]
-    wb = Workbook(); ws = wb.active; ws.title = data['sheet_name'][:31]
-    cols = data['columns']
-    header = ['Row'] + [c['name'] for c in cols]
-    ws.append(header)
-    # 列宽
-    for i, c in enumerate(cols, start=2):
-        ws.column_dimensions[get_column_letter(i)].width = max(8, min(60, c['width'] / 4))
-    ws.column_dimensions['A'].width = 10
-    # 行数据
-    for row in data['rows']:
-        rec = [row['row']]
-        for cell in row['cells']:
-            if isinstance(cell, dict) and 'value' in cell:
-                rec.append(cell['value'])
-            else:
-                rec.append('')
-        ws.append(rec)
-    # 图片列：在数据下方叠加缩略图
-    # 找到图片列索引（1-based: 第1列是Row）
-    icon_cols = [(i + 2) for i, c in enumerate(cols) if c.get('is_icon')]
-    if icon_cols:
-        for r, row in enumerate(data['rows'], start=2):
-            for ci, cell in enumerate(row['cells']):
-                if isinstance(cell, dict) and 'icon_path' in cell and os.path.exists(cell['icon_path']):
-                    col_letter = get_column_letter(ci + 2)
-                    try:
-                        img = XLImage(cell['icon_path'])
-                        img.width = 30; img.height = 30
-                        anchor = f"{col_letter}{r}"
-                        ws.add_image(img, anchor)
-                        # 该单元格写 id 便于对照
-                        ws[f"{col_letter}{r}"] = cell['id']
-                    except Exception:
-                        ws[f"{col_letter}{r}"] = cell['id']
-    wb.save(out)
-    print("saved", out)
-
-main()
-"#;
-
-/// 生成图片的 Python 脚本（matplotlib 第三方开源库）。
-const IMAGE_SCRIPT: &str = r#"
-import json, sys, os
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-from matplotlib import font_manager
-
-def setup_font():
-    for name in ['Microsoft YaHei', 'SimHei', 'Noto Sans CJK SC', 'Noto Sans SC', 'Songti SC']:
-        try:
-            font_manager.findfont(name, fallback_to_default=False)
-            plt.rcParams['font.family'] = [name]
-            break
-        except Exception:
-            continue
-    plt.rcParams['axes.unicode_minus'] = False
-
-def main():
-    setup_font()
-    data = json.load(open(sys.argv[1], encoding='utf-8'))
-    out = sys.argv[2]
-    cols = [c['name'] for c in data['columns']]
-    rows = data['rows']
-    # 单元格文本
-    cells = []
-    for row in rows:
-        line = [str(row['row'])]
-        for cell in row['cells']:
-            if isinstance(cell, dict) and 'value' in cell:
-                line.append(str(cell['value']))
-            else:
-                line.append(cell.get('id', ''))
-        cells.append(line)
-    header = ['Row'] + cols
-    fig_w = max(10, len(header) * 2.2)
-    fig_h = max(3, (len(cells) + 1) * 0.45 + 1.2)
-    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
-    ax.axis('off')
-    title = data['sheet_name'] + (f"  (第 {data['page']+1}/{data['total_pages']} 页)" if data['total_pages'] > 1 else "")
-    ax.set_title(title, fontsize=12, pad=8)
-    tbl = ax.table(cellText=cells, colLabels=header, loc='center', cellLoc='left')
-    tbl.auto_set_font_size(False)
-    tbl.set_fontsize(8)
-    tbl.scale(1, 1.2)
-    try:
-        fig.savefig(out, dpi=150, bbox_inches='tight')
-        print("saved", out)
-    except Exception as e:
-        print("ERR", e, file=sys.stderr)
-        sys.exit(1)
-    plt.close(fig)
-
-main()
-"#;
 
 // 引用避免未使用告警
 #[allow(unused_imports)]

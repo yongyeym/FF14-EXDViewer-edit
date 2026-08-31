@@ -26,3 +26,6 @@ config/*_list_*.json
 log.txt
 log*.txt
 misc_sheets.txt
+tools/dist/
+tools/build/
+tools/*.spec
