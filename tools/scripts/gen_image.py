@@ -60,6 +60,8 @@ def main():
     font_s = load_font(11)
 
     header = ['Row'] + [c['name'] for c in cols]
+    # 测量用 draw：文本宽测量不依赖最终画布
+    measure = ImageDraw.Draw(Image.new('RGB', (1, 1)))
 
     # 预解析行内容 / 图标
     rows_dec = []
@@ -74,12 +76,12 @@ def main():
         rows_dec.append((row['row'], texts, icons))
 
     # 列宽自适应
-    widths = [max(60, te(d, header[0], font) + 16)]
+    widths = [max(60, te(measure, header[0], font) + 16)]
     for ci in range(len(cols)):
-        mx = te(d, header[ci + 1], font) + 16
+        mx = te(measure, header[ci + 1], font) + 16
         for (_, texts, icons) in rows_dec:
             if ci < len(texts) and texts[ci]:
-                mx = max(mx, te(d, texts[ci], font) + 16)
+                mx = max(mx, te(measure, texts[ci], font) + 16)
             if ci < len(icons) and icons[ci] and os.path.exists(icons[ci]):
                 pass
         mx = max(MIN_ICON if cols[ci].get('is_icon') else 0, mx)
@@ -100,14 +102,16 @@ def main():
             if ci < len(texts) and texts[ci]:
                 # 该列可用宽内可放字符数
                 avail = widths[ci + 1] - 12
-                cw = te(d, 'x', font_s) or 1
+                cw = te(measure, 'x', font_s) or 1
                 chars_per_line = max(1, int(avail / cw))
                 lines = max(1, -(-len(str(texts[ci])) // chars_per_line))
-                h = max(h, lines * (te(d, 'Ag', font_s) + 4) + 8)
+                h = max(h, lines * (te(measure, 'Ag', font_s) + 4) + 8)
         row_heights.append(h)
 
-    W = sum(widths) + pad * (len(widths) + 1)
-    H = pad + 26 + header_h + pad + sum(row_heights) + pad * len(rows) + pad
+    widths = [int(round(w)) for w in widths]
+    row_heights = [int(round(h)) for h in row_heights]
+    W = int(sum(widths) + pad * (len(widths) + 1))
+    H = int(pad + 26 + header_h + pad + sum(row_heights) + pad * len(rows) + pad)
     img = Image.new('RGB', (W, H), 'white')
     d = ImageDraw.Draw(img)
 
