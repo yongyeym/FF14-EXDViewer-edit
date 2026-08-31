@@ -82,23 +82,17 @@ def main():
         for (_, texts, icons) in rows_dec:
             if ci < len(texts) and texts[ci]:
                 mx = max(mx, te(measure, texts[ci], font) + 16)
-            if ci < len(icons) and icons[ci] and os.path.exists(icons[ci]):
-                pass
-        mx = max(MIN_ICON if cols[ci].get('is_icon') else 0, mx)
+        mx = max(MIN_ICON + 8 if cols[ci].get('is_icon') else 0, mx)
         widths.append(mx)
 
     # 行高自适应（文本换行 + 图标）
     row_heights = []
     for (rid, texts, icons) in rows_dec:
         h = row_h_base
-        # 图标行高：至少 40px 或图片实际高度
+        # 图标行高：取缩略图显示尺寸(MIN_ICON+pad)，不随原图高，避免大量空白
         for ci in range(len(cols)):
             if ci < len(icons) and icons[ci] and os.path.exists(icons[ci]):
-                try:
-                    ih = Image.open(icons[ci]).height
-                    h = max(h, max(MIN_ICON, ih) + 8)
-                except Exception:
-                    pass
+                h = max(h, MIN_ICON + 8)
             if ci < len(texts) and texts[ci]:
                 # 该列可用宽内可放字符数
                 avail = widths[ci + 1] - 12
