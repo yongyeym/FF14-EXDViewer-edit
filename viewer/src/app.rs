@@ -515,7 +515,7 @@ impl App {
                 ui.set_width(420.0);
                 let text = match &self.export_confirm {
                     Some(ExportConfirmKind::MiscSheets) => {
-                        "将从本地游戏文件exd/root.exl中导出游戏数据表ID记录，并导出为程序目录/export/misc_sheets_[当前版本号].txt。是否确定导出？"
+                        "将从本地游戏文件exd/root.exl中导出游戏数据表ID记录，并导出为程序目录/export/result/misc_sheets_[当前版本号].txt。是否确定导出？"
                     }
                     _ => "导出全部文件耗时较长，本程序可能会长时间无响应或运行卡顿，建议您在导出过程中不要运行FF14游戏。是否确认开始导出？",
                 };
@@ -569,7 +569,7 @@ impl App {
             .show(ctx, |ui| {
                 ui.set_width(450.0);
                 ui.label(
-                    "将对比选择的两个版本号对应本地CSV文件，确定是否有文件内容变更，将有变更的表格名称列出并保存到程序目录/export/diff_sheets.txt",
+                    "将对比选择的两个版本号对应本地CSV文件，确定是否有文件内容变更，将有变更的表格名称列出并保存到程序目录/export/result/diff_sheets.txt",
                 );
                 ui.add_space(6.0);
                 ui.horizontal(|ui| {
@@ -640,8 +640,9 @@ impl App {
                         .unwrap_or_else(|| std::path::PathBuf::from("export/data"));
                     let export_dir = export_base
                         .parent()
-                        .map(|p| p.to_path_buf())
-                        .unwrap_or_else(|| std::path::PathBuf::from("export"));
+                        .map(|p| p.join("result"))
+                        .unwrap_or_else(|| std::path::PathBuf::from("export/result"));
+                    let _ = std::fs::create_dir_all(&export_dir);
                     let out_path = export_dir.join(format!("diff_sheets_{old}_{new}.txt"));
                     let outcome = match compare_sheet_version_csvs(&old, &new, &export_base, &out_path) {
                         Ok((changed, new_only, old_only)) => {
@@ -693,7 +694,7 @@ impl App {
                 self.command_export_all_csv(backend, lang, false, version, false);
             }
             ExportConfirmKind::MiscSheets => {
-                // 导出数据表ID：从本地游戏 sqpack 读 exd/root.exl，输出 export/misc_sheets_[版本].txt
+                // 导出数据表ID：从本地游戏 sqpack 读 exd/root.exl，输出 export/result/misc_sheets_[版本].txt
                 let sqpack_dir = BACKEND_CONFIG.get(ctx).and_then(|config| {
                     if let InstallLocation::Sqpack(dir) = &config.location {
                         Some(dir.clone())
@@ -707,8 +708,8 @@ impl App {
                 };
                 let export_dir = std::env::current_exe()
                     .ok()
-                    .and_then(|p| p.parent().map(|p| p.join("export")))
-                    .unwrap_or_else(|| std::path::PathBuf::from("export"));
+                    .and_then(|p| p.parent().map(|p| p.join("export").join("result")))
+                    .unwrap_or_else(|| std::path::PathBuf::from("export/result"));
                 let _ = std::fs::create_dir_all(&export_dir);
                 let ver = version
                     .map(|v| v.to_string())
