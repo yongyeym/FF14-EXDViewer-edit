@@ -106,6 +106,8 @@ pub struct TrackRow {
     pub row_id: u32,
     pub path: String,
     pub name: String,
+    /// 筛选用：同时包含映射歌曲名与原始文件名
+    pub search_text: String,
     pub available: bool,
 }
 
@@ -434,10 +436,13 @@ impl MusicPlayer {
                     Avail::Ready(set) => set.contains(&track.path),
                     _ => true,
                 };
+                let original = file_stem(&track.path);
                 TrackRow {
                     row_id: track.row_id,
                     path: track.path.clone(),
-                    name,
+                    name: name.clone(),
+                    // 筛选同时匹配映射名与原始文件名(不受显示名开关影响)
+                    search_text: format!("{} {}", name, original),
                     available,
                 }
             })
@@ -526,7 +531,7 @@ impl MusicPlayer {
                 .filter(|row| {
                     !self.show_new_only || self.new_paths.contains(&row.path)
                 }),
-            |row| row.name.as_str(),
+            |row| row.search_text.as_str(),
         );
 
         let mut clicked = None;
@@ -649,6 +654,11 @@ impl MusicPlayer {
             .get(&row_id)
             .filter(|song| !song.locations.is_empty())
             .map(|song| song.locations.clone());
+        let song_info = self
+            .songs
+            .get(&row_id)
+            .filter(|song| !song.info.is_empty())
+            .map(|song| song.info.clone());
         let playing = self.player.as_ref().is_some_and(Player::is_playing);
         let (position, duration) = self
             .player
@@ -689,9 +699,14 @@ impl MusicPlayer {
                 }
 
                 ui.label(RichText::new(&name).size(26.0).strong());
+                // 三条歌曲信息：标题下方、进度条上方
                 if let Some(locations) = &locations {
-                    ui.label(RichText::new(locations).weak());
+                    ui.label(RichText::new(format!("英文名: {locations}")).weak());
                 }
+                if let Some(song_info) = &song_info {
+                    ui.label(RichText::new(format!("获取途径: {song_info}")).weak());
+                }
+                ui.label(RichText::new(format!("时长: {}", format_time(duration))).weak());
                 ui.add_space(18.0);
 
                 ui.horizontal(|ui| {
@@ -756,7 +771,6 @@ impl MusicPlayer {
                 }
                 ui.add_space(12.0);
 
-                let song = self.songs.get(&row_id);
                 draw_info(
                     ui,
                     &info,
@@ -765,7 +779,6 @@ impl MusicPlayer {
                     duration,
                     loop_range,
                     &path,
-                    song,
                 );
             },
         );
@@ -857,7 +870,6 @@ fn draw_info(
     duration: f64,
     loop_range: Option<(f64, f64)>,
     path: &str,
-    song: Option<&SongInfo>,
 ) {
     let looping = loop_range.is_some();
     let bitrate = if duration > 0.0 {
@@ -895,15 +907,6 @@ fn draw_info(
         ));
     }
     ui.add_space(4.0);
-    if let Some(song) = song {
-        if !song.locations.is_empty() {
-            ui.label(RichText::new(format!("英文名: {}", song.locations.trim_end_matches('*'))).weak());
-        }
-        if !song.info.is_empty() {
-            ui.label(RichText::new(format!("获取途径: {}", song.info.trim_end_matches('*'))).weak());
-        }
-    }
-    ui.label(RichText::new(format!("时长: {}", format_time(duration))).weak());
     ui.label(RichText::new(path).weak().small());
 }
 
