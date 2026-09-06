@@ -184,37 +184,74 @@ FF14 EXDViewer edit 是使用 **Rust + egui** 构建的Windows桌面应用程序
 ## 项目目录结构
 
 ```
-FF14\_EXDViewer\_edit/
-├── Cargo.toml              # 工作区配置
-├── Dockerfile              # Web 版 Docker 部署
-├── deps/                   # 本地依赖（ironworks 等）
-├── deps/                   # 本地依赖（ironworks、d3dasm 等）
-├── glyphnames/             # 字形名列表 crate（资源查看用）
-├── luadec/                 # Lua 字节码反编译 crate（资源查看用）
-├── pathlist/               # FFXIV 路径列表编码 crate
-├── shaders/                # 着色器名列表 crate
-├── shadermerge/            # 着色器合并 crate（shpk 查看用）
-├── viewer/                 # 桌面客户端主程序
-│   ├── Cargo.toml          # viewer crate 配置（包名 ff14-exdviewer-edit）
+FF14_EXDViewer_edit/
+├── Cargo.lock               # 依赖锁定版本
+├── Cargo.toml               # 工作区配置
+├── Dockerfile               # Web 版 Docker 部署
+├── LICENSE                  # 许可证
+├── README.md                # 本文档
+├── config.yml               # 项目配置
+├── .dockerignore
+├── .gitignore
+├── .cargo/                  # Cargo 配置
+├── .vscode/                 # VS Code 编辑器配置
+├── #版本留档/               # 版本留档目录（自定义）
+├── config/                  # 运行时配置（数据表列表存档、列布局等）
+├── deps/                    # 本地依赖（ironworks、d3dasm、ffxiv-downloader 等）
+├── glyphnames/              # 字形名列表 crate（资源查看用）
+├── luadec/                  # Lua 字节码反编译 crate（资源查看用）
+├── pathlist/                # FFXIV 路径列表编码 crate
+├── shaders/                 # 着色器名列表 crate
+├── shadermerge/             # 着色器合并 crate（shpk 查看用）
+├── tools/                   # 独立工具
+│   ├── hca.exe              # HCA 音频解码程序
+│   ├── gen_excel_tool.exe   # 生成总结表 Excel 的工具
+│   ├── gen_image_tool.exe   # 生成总结表图片的工具
+│   └── scripts/             # 工具源码（gen_excel.py / gen_image.py）+ README.md
+├── viewer/                  # 桌面客户端主程序
+│   ├── Cargo.toml
+│   ├── Trunk.toml           # Web 版构建配置
+│   ├── build.rs             # 构建脚本
+│   ├── assets/              # 图标 / 字体等资源
+│   ├── index.html           # Web 版入口
+│   ├── examples/            # 示例代码
 │   └── src/
-│       ├── main.rs         # 程序入口，日志初始化
-│       ├── lib.rs          # 模块注册与全局常量
-│       ├── app.rs          # 主界面逻辑（路由、菜单、导出、Diff、下载）
-│       ├── backend.rs      # 后端数据提供者（游戏版本等）
-│       ├── downloader.rs   # EXDSchema / HCADecoder 下载模块
-│       ├── diff.rs         # 版本对比模块（CSV 解析、差异计算、表格渲染）
-│       ├── list\_tracker.rs # 版本化列表存储与新增项对比/归档
-│       ├── map.rs          # 地图列表（左侧列表 + 右侧预览 + 图片保存）
-│       ├── music.rs        # 音乐播放器（含新增项筛选）
-│       ├── icons/          # 图标列表（分类、网格、反向引用）
-│       ├── assets/         # 资源列表（搜索、文件树、3D 查看器）
-│       ├── sheet/          # 数据表渲染（表格、单元格、图标）
-│       ├── excel/          # 游戏数据访问（SqPack 解析）
-│       ├── goto.rs         # 跳转窗口（含 Palette 调色板/列表导航）
-│       ├── settings.rs     # 设置项与配置文件结构
-│       ├── config\_file.rs  # settings.json 读写
-│       └── utils/          # 图标管理、Promise 工具、纹理解码等
-└── README.md               # 本文档
+│       ├── main.rs          # 程序入口，日志初始化
+│       ├── lib.rs           # 模块注册与全局常量
+│       ├── app.rs           # 主界面逻辑（路由、菜单、导出、Diff、下载）
+│       ├── about.rs         # 「关于」窗口
+│       ├── audio/           # 音频解码 / 播放
+│       ├── backend.rs       # 后端数据提供者（游戏版本等）
+│       ├── bin/             # 独立小工具（bin）
+│       ├── clipboard.rs     # 系统剪贴板图片写入
+│       ├── column_layout.rs # 列布局配置（个性化表格）
+│       ├── combined_log.rs  # 日志合并
+│       ├── config_file.rs   # settings.json 读写
+│       ├── data/            # 游戏数据访问（SqPack 解析）
+│       ├── diff.rs          # 版本对比模块（CSV 解析、差异计算、表格渲染）
+│       ├── downloader.rs    # EXDSchema / HCADecoder 下载模块
+│       ├── editable_schema.rs # 可编辑 schema
+│       ├── excel/           # Excel 数据表访问
+│       ├── github/          # GitHub 相关
+│       ├── goto.rs          # 跳转窗口（含 Palette 调色板 / 列表导航）
+│       ├── icons/           # 图片列表（分类、网格、反向引用）
+│       ├── list_tracker.rs  # 版本化列表存储与新增项对比 / 归档
+│       ├── map.rs           # 地图列表（左侧列表 + 右侧预览 + 图片保存）
+│       ├── misc_sheets.rs   # 杂项表 / 数据表 ID 导出
+│       ├── music.rs         # 音乐播放器（含新增项筛选）
+│       ├── pr_window.rs     # PR 窗口
+│       ├── router/          # 路由
+│       ├── schema/          # schema 逻辑
+│       ├── settings.rs      # 设置项与配置文件结构
+│       ├── setup.rs         # 初始化
+│       ├── sheet/           # 数据表渲染（表格、单元格、图标）
+│       ├── shortcuts.rs     # 快捷键
+│       ├── stopwatch.rs     # 时钟工具
+│       ├── summary_export.rs # 导出数据表内容Diff总结表
+│       ├── utils/           # 图标管理、Promise 工具、纹理解码等
+│       └── worker/          # worker
+├── web/                     # Web 服务端
+└── target/                  # 编译产物（构建生成）
 ```
 
 ## 技术栈与参考项目
