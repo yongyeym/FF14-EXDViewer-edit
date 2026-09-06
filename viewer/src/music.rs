@@ -124,6 +124,8 @@ pub struct MusicPlayer {
     show_unavailable: bool,
     pub show_new_only: bool,
     pub new_paths: std::collections::HashSet<String>,
+    /// 左侧列表显示映射歌曲名(true)还是原始文件名(false)
+    pub show_names: bool,
     show_visualizer: bool,
     pub rows: Vec<TrackRow>,
     rows_stale: bool,
@@ -149,6 +151,7 @@ impl Default for MusicPlayer {
             show_unavailable: false,
             show_new_only: false,
             new_paths: std::collections::HashSet::new(),
+            show_names: true,
             show_visualizer: true,
             rows: Vec::new(),
             rows_stale: true,
@@ -338,7 +341,7 @@ impl MusicPlayer {
         self.songs
             .get(&row_id)
             .filter(|song| !song.title.is_empty())
-            .map_or_else(|| file_stem(path), |song| song.title.clone())
+            .map_or_else(|| file_stem(path), |song| song.title.trim_end_matches('*').to_string())
     }
 
     fn begin_load(&mut self, backend: &Backend, row_id: u32, path: String) {
@@ -426,7 +429,7 @@ impl MusicPlayer {
                     .songs
                     .get(&track.row_id)
                     .filter(|song| !song.title.is_empty())
-                    .map_or_else(|| file_stem(&track.path), |song| song.title.clone());
+                    .map_or_else(|| file_stem(&track.path), |song| song.title.trim_end_matches('*').to_string());
                 let available = match &self.avail {
                     Avail::Ready(set) => set.contains(&track.path),
                     _ => true,
@@ -469,6 +472,9 @@ impl MusicPlayer {
                     {
                         self.search.clear();
                     }
+                    // 显示歌曲名/文件名开关（默认开启显示映射歌曲名）
+                    ui.toggle_value(&mut self.show_names, "🎼")
+                        .on_hover_text("点击切换显示歌曲名/文件名");
                     let unavailable = self.rows.iter().filter(|row| !row.available).count();
                     if unavailable > 0 {
                         ui.toggle_value(&mut self.show_unavailable, "🚫")
@@ -535,7 +541,13 @@ impl MusicPlayer {
                         ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
                         let response = ui
                             .add_enabled_ui(row.available, |ui| {
-                                Button::selectable(selected == Some(row.row_id), row.name.as_str())
+                                // 显示名随开关：映射歌曲名或原始文件名
+                                let display = if self.show_names {
+                                    row.name.clone()
+                                } else {
+                                    file_stem(&row.path)
+                                };
+                                Button::selectable(selected == Some(row.row_id), display.as_str())
                                     .ui(ui)
                             })
                             .inner
@@ -551,23 +563,29 @@ impl MusicPlayer {
     }
 
     fn row_hover(&self, ui: &mut egui::Ui, row: &TrackRow) {
-        ui.strong(&row.name);
+        // 标题随开关：显示映射歌曲名或原始文件名；映射名已去掉尾部星号
+        let display = if self.show_names {
+            row.name.clone()
+        } else {
+            file_stem(&row.path)
+        };
+        ui.strong(&display);
         if let Some(song) = self.songs.get(&row.row_id) {
             if !song.alt.is_empty() {
-                ui.label(format!("Also known as: {}", song.alt));
+                ui.label(format!("别名: {}", song.alt));
             }
             if !song.special.is_empty() {
-                ui.label(format!("Special mode: {}", song.special));
+                ui.label(format!("特殊模式: {}", song.special));
             }
             if !song.locations.is_empty() {
-                ui.label(format!("Locations: {}", song.locations));
+                ui.label(format!("英文名: {}", song.locations));
             }
             if !song.info.is_empty() {
-                ui.label(format!("Notes: {}", song.info));
+                ui.label(format!("获取途径: {}", song.info));
             }
             if song.duration > 0 {
                 ui.label(format!(
-                    "Duration: {}",
+                    "时长: {}",
                     format_time(f64::from(song.duration))
                 ));
             }
@@ -738,6 +756,7 @@ impl MusicPlayer {
                 }
                 ui.add_space(12.0);
 
+                let song = self.songs.get(&row_id);
                 draw_info(
                     ui,
                     &info,
@@ -746,6 +765,7 @@ impl MusicPlayer {
                     duration,
                     loop_range,
                     &path,
+                    song,
                 );
             },
         );
@@ -837,6 +857,7 @@ fn draw_info(
     duration: f64,
     loop_range: Option<(f64, f64)>,
     path: &str,
+    song: Option<&SongInfo>,
 ) {
     let looping = loop_range.is_some();
     let bitrate = if duration > 0.0 {
@@ -874,6 +895,15 @@ fn draw_info(
         ));
     }
     ui.add_space(4.0);
+    if let Some(song) = song {
+        if !song.locations.is_empty() {
+            ui.label(RichText::new(format!("英文名: {}", song.locations.trim_end_matches('*'))).weak());
+        }
+        if !song.info.is_empty() {
+            ui.label(RichText::new(format!("获取途径: {}", song.info.trim_end_matches('*'))).weak());
+        }
+    }
+    ui.label(RichText::new(format!("时长: {}", format_time(duration))).weak());
     ui.label(RichText::new(path).weak().small());
 }
 
