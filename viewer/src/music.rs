@@ -18,7 +18,7 @@ use crate::backend::Backend;
 use crate::data::{FileProvider, FileProviderExt};
 use crate::excel::base::CachedProvider;
 use crate::excel::provider::{ExcelHeader, ExcelProvider, ExcelSheet};
-use crate::settings::{BACKEND_CONFIG, InstallLocation, LANGUAGE};
+use crate::settings::LANGUAGE;
 use crate::utils::{
     CollapsibleSidePanel, FuzzyMatcher, PromiseKind, Side, TrackedPromise, fetch_url_str,
 };
@@ -184,13 +184,9 @@ impl MusicPlayer {
     }
 
     pub fn ui(&mut self, ui: &mut egui::Ui, backend: &Backend) -> Option<MusicEvent> {
-        let api_url = match BACKEND_CONFIG.get(ui.ctx()) {
-            Some(config) => match config.location {
-                InstallLocation::Web(url, ..) => Some(url),
-                _ => None,
-            },
-            None => None,
-        };
+        // 歌曲名映射：始终用 api_base（本地 Sqpack 安装也能加载 songs 映射），
+        // 网络不可用时 poll 回退为原始文件名
+        let api_url = Some(crate::settings::api_base(ui.ctx()));
         self.poll(backend, api_url, LANGUAGE.get(ui.ctx()));
         if let Some(player) = &mut self.player {
             player.take_media_action();
