@@ -41,6 +41,11 @@
 
 **字体文件原始许可文件**：https://fonts.google.com/noto （OFL 1.1 全文见 https://openfontlicense.org）
 
+**FFXIV_Lodestone_SSF.ttf**（`viewer/assets/FFXIV_Lodestone_SSF.ttf`）
+- 来源: 原始项目 WorkingRobot/EXDViewer（XIViewer）自带并公开分发的资源。
+- 版权: © SQUARE ENIX CO., LTD. —— 此为《最终幻想14》官方站点（Lodestone）字体。
+- 说明: 程序运行时**未加载/引用**该字体文件（仅为原项目附带资源）；随本仓库再分发与原项目分发行为一致。请悉知该字体版权归 SQUARE ENIX，仅供个人浏览学习用途，请勿用于商业用途。
+
 ## 其他资源
 
 - 程序图标等 `viewer/assets/*.png/svg/ico` 来自原始项目（WorkingRobot/EXDViewer，MIT）。
