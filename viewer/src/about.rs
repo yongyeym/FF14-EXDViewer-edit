@@ -59,7 +59,7 @@ pub fn draw(ctx: &egui::Context, open: &mut bool) {
             ui.add_space(6.0);
 
             ui.vertical_centered(|ui| {
-                ui.label(RichText::new("Special Thanks").size(subheader_size));
+                ui.label(RichText::new("特别鸣谢").size(subheader_size));
             });
             ui.add_space(4.0);
 
@@ -82,41 +82,41 @@ pub fn draw(ctx: &egui::Context, open: &mut bool) {
 
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
-                ui.label("Thank you to all ");
+                ui.label("感谢所有 ");
                 ui.add(
                     Hyperlink::from_label_and_url("EXDSchema", crate::SCHEMA_REPO_URL)
                         .open_in_new_tab(true),
                 );
-                ui.label(" contributors for your schema definitions.");
+                ui.label(" 贡献者提供的 schema 定义。");
             });
 
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
-                ui.label("Thank you to ");
+                ui.label("感谢 ");
                 ui.add(
                     Hyperlink::from_label_and_url("ackwell", crate::ACKWELL_URL)
                         .open_in_new_tab(true),
                 );
-                ui.label(" for ");
+                ui.label(" 提供的 ");
                 ui.add(
                     Hyperlink::from_label_and_url("ironworks", crate::IRONWORKS_URL)
                         .open_in_new_tab(true),
                 );
-                ui.label(".");
+                ui.label("。");
             });
 
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
-                ui.label("Built with ");
+                ui.label("使用 ");
                 ui.add(
                     Hyperlink::from_label_and_url("egui", crate::EGUI_URL).open_in_new_tab(true),
                 );
-                ui.label(" and ");
+                ui.label(" 和 ");
                 ui.add(
                     Hyperlink::from_label_and_url("eframe", crate::EFRAME_URL)
                         .open_in_new_tab(true),
                 );
-                ui.label(".");
+                ui.label(" 构建。");
             });
         });
 }
