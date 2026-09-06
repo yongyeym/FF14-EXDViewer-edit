@@ -43,21 +43,14 @@ pub fn draw(ctx: &egui::Context, open: &mut bool) {
                             .small()
                             .weak(),
                         );
-                        centered_inline(ui, "By Asriel", |ui| {
-                            ui.label("By ");
-                            ui.add(
-                                Hyperlink::from_label_and_url("Asriel", crate::AUTHOR_URL)
-                                    .open_in_new_tab(true),
-                            );
-                        });
-                        centered_inline(ui, "Support me on Ko-fi!", |ui| {
-                            ui.label("Support me on ");
-                            ui.add(
-                                Hyperlink::from_label_and_url("Ko-fi", crate::KOFI_URL)
-                                    .open_in_new_tab(true),
-                            );
-                            ui.label("!");
-                        });
+                        ui.label(RichText::new("修改版 By 咏夜YM@潮风亭").weak());
+                        ui.label(
+                            RichText::new(
+                                "使用AI大模型，基于WorkingRobot/EXDViewer项目V1.7.0版本二次开发"
+                            )
+                            .weak()
+                            .small(),
+                        );
                     });
                 });
             });
@@ -69,6 +62,23 @@ pub fn draw(ctx: &egui::Context, open: &mut bool) {
                 ui.label(RichText::new("Special Thanks").size(subheader_size));
             });
             ui.add_space(4.0);
+
+            // 原项目作者（由原 By Asriel / Support me on Ko-fi 两行合并而来）
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                ui.label("原项目作者 ");
+                ui.add(
+                    Hyperlink::from_label_and_url("Asriel", crate::AUTHOR_URL)
+                        .open_in_new_tab(true),
+                );
+                ui.label("，");
+                ui.add(
+                    Hyperlink::from_label_and_url("点击此处", crate::KOFI_URL)
+                        .open_in_new_tab(true),
+                );
+                ui.label("为原作者打赏。");
+            });
+            ui.add_space(6.0);
 
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;

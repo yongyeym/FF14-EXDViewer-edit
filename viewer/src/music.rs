@@ -707,6 +707,7 @@ impl MusicPlayer {
                     ui.label(RichText::new(format!("获取途径: {song_info}")).weak());
                 }
                 ui.label(RichText::new(format!("时长: {}", format_time(duration))).weak());
+                ui.label(RichText::new(&path).weak());
                 ui.add_space(18.0);
 
                 ui.horizontal(|ui| {
@@ -778,7 +779,6 @@ impl MusicPlayer {
                     sample_rate,
                     duration,
                     loop_range,
-                    &path,
                 );
             },
         );
@@ -869,7 +869,6 @@ fn draw_info(
     sample_rate: u32,
     duration: f64,
     loop_range: Option<(f64, f64)>,
-    path: &str,
 ) {
     let looping = loop_range.is_some();
     let bitrate = if duration > 0.0 {
@@ -907,7 +906,6 @@ fn draw_info(
         ));
     }
     ui.add_space(4.0);
-    ui.label(RichText::new(path).weak().small());
 }
 
 fn center<R>(ui: &mut egui::Ui, contents: impl FnOnce(&mut egui::Ui) -> R) -> R {
