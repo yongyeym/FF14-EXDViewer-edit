@@ -29,3 +29,5 @@ misc_sheets.txt
 tools/dist/
 tools/build/
 tools/*.spec
+tools/scripts/__pycache__/
+tools/scripts/*.pyc
