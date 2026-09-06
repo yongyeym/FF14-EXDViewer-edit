@@ -2819,6 +2819,11 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                     let png = self.icon_manager.get_png_bytes(icon_id, hires);
                     self.command_save_icon_detail(backend.clone(), icon_id, hires, png);
                 }
+                icons::Action::Copy(icon_id) => {
+                    let hires = ALWAYS_HIRES.get(ui.ctx());
+                    let png = self.icon_manager.get_png_bytes(icon_id, hires);
+                    self.command_copy_icon_detail(backend.clone(), icon_id, hires, png);
+                }
             }
         }
     }
@@ -2874,6 +2879,9 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                 crate::map::MapEvent::Select(_) => {}
                 crate::map::MapEvent::ExportOne(code) => {
                     self.command_export_map_one(&backend, &code);
+                }
+                crate::map::MapEvent::CopyOne(code) => {
+                    self.command_copy_map_one(&backend, &code);
                 }
                 crate::map::MapEvent::ExportAll => {
                     self.command_export_map_all(&backend);
@@ -3492,6 +3500,47 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
         }
     }
 
+    /// 复制当前图片到系统剪贴板（供粘贴到其他程序）。
+    fn command_copy_icon_detail(
+        &mut self,
+        backend: Backend,
+        icon_id: u32,
+        hires: bool,
+        png_bytes: Option<Vec<u8>>,
+    ) {
+        let bytes = if let Some(bytes) = png_bytes {
+            bytes
+        } else {
+            let excel = backend.excel().clone();
+            match futures::executor::block_on(excel.get_icon(icon_id, hires)) {
+                Ok(either::Either::Right(image)) => {
+                    let mut buf = std::io::Cursor::new(Vec::new());
+                    if image.write_to(&mut buf, image::ImageFormat::Png).is_err() {
+                        log::error!("图片 {icon_id} 编码PNG失败");
+                        return;
+                    }
+                    buf.into_inner()
+                }
+                Ok(either::Either::Left(url)) => {
+                    log::warn!("图片来自URL，暂不支持复制: {url}");
+                    return;
+                }
+                Err(e) => {
+                    log::error!("读取图片 {icon_id} 失败: {e}");
+                    return;
+                }
+            }
+        };
+        match image::load_from_memory(&bytes) {
+            Ok(img) => {
+                if crate::clipboard::copy_rgba(img.to_rgba8()) {
+                    log::info!("图片 {icon_id} 已复制到剪贴板");
+                }
+            }
+            Err(e) => log::error!("解码图片 {icon_id} 失败: {e}"),
+        }
+    }
+
     /// 导出全部图片资源：图片列表中的全部图片保存到 export/img/ui_{id}.png（含进度窗口与中断）
     fn command_export_all_images(&mut self, backend: Backend, hires: bool) {
         let export_dir = std::env::current_exe()
@@ -3681,6 +3730,26 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
     }
 
     /// 保存全部地图：自动保存到 exe目录/export/map/，带进度窗口（与其他批量导出一致）。
+
+    /// 复制指定地图分图到系统剪贴板（供粘贴到其他程序）。
+    fn command_copy_map_one(&mut self, backend: &Backend, code: &str) {
+        let code_owned = code.to_string();
+        let files = backend.files().clone();
+        self.export_promise = Some(TrackedPromise::spawn_local(async move {
+            match crate::map::load_map_texture(&*files, &code_owned).await {
+                Ok(img) => {
+                    if crate::clipboard::copy_rgba(img) {
+                        log::info!("地图 {code_owned} 已复制到剪贴板");
+                    }
+                }
+                Err(e) => {
+                    log::error!("读取地图 {code_owned} 失败: {e}");
+                }
+            }
+        }));
+    }
+
+
     fn command_export_map_all(&mut self, backend: &Backend) {
         let export_dir = std::env::current_exe()
             .ok()

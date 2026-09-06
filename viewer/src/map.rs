@@ -100,6 +100,8 @@ pub enum MapEvent {
     Select(usize),
     /// 保存指定分图（弹出文件选择器）
     ExportOne(String),
+    /// 复制指定分图到系统剪贴板
+    CopyOne(String),
     /// 保存全部地图
     ExportAll,
 }
@@ -418,11 +420,17 @@ impl MapViewer {
                                         );
                                     }
                                 }
-                                // 下方：短编号 + 保存按钮（居中）
+                                // 下方：短编号 + 复制/保存按钮（居中，两个按钮间留间距）
                                 ui.label(RichText::new(&sub.display).strong());
-                                if ui.button("保存地图").clicked() {
-                                    event = Some(MapEvent::ExportOne(sub.code.clone()));
-                                }
+                                ui.horizontal(|ui| {
+                                    if ui.button("复制此地图图片").clicked() {
+                                        event = Some(MapEvent::CopyOne(sub.code.clone()));
+                                    }
+                                    ui.add_space(8.0);
+                                    if ui.button("保存此地图图片文件").clicked() {
+                                        event = Some(MapEvent::ExportOne(sub.code.clone()));
+                                    }
+                                });
                                 });
                             });
                         }

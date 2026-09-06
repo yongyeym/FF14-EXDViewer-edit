@@ -38,6 +38,8 @@ pub enum Action {
     Navigate(String),
     /// The detail panel asked to save the icon.
     Save(u32),
+    /// The detail panel asked to copy the icon to the clipboard.
+    Copy(u32),
 }
 
 /// Which subset of the install's icons the grid is showing.
@@ -184,6 +186,7 @@ impl IconBrowser {
 
         self.side_panel(ui, backend);
         let mut save_request = None;
+        let mut copy_request = None;
         // 反向引用确认弹窗（Window 控制关闭，三段提示分行展示）
         if self.confirm_walk {
             let mut confirmed = false;
@@ -217,7 +220,7 @@ impl IconBrowser {
                 self.start_walk(backend);
             }
         }
-        let followed = self.detail_panel(ui, backend, icons, &mut save_request);
+        let followed = self.detail_panel(ui, backend, icons, &mut save_request, &mut copy_request);
         let opened = self.grid_panel(ui, backend, icons);
 
         if let Some(icon_id) = self.modal_icon {
@@ -233,6 +236,7 @@ impl IconBrowser {
             .or_else(|| followed.map(Action::Navigate))
             .or_else(|| opened.map(Action::Select))
             .or_else(|| save_request.map(Action::Save))
+            .or_else(|| copy_request.map(Action::Copy))
     }
 
     fn draw_palette(&mut self, ctx: &egui::Context, backend: &Backend) -> Option<u32> {
@@ -847,6 +851,7 @@ impl IconBrowser {
         backend: &Backend,
         icons: &IconManager,
         save_request: &mut Option<u32>,
+        copy_request: &mut Option<u32>,
     ) -> Option<String> {
         let mut followed = None;
         let mut nav = std::mem::take(&mut self.nav);
@@ -894,6 +899,7 @@ impl IconBrowser {
                                 icon_id,
                                 &mut nav,
                                 save_request,
+                                copy_request,
                             );
                         });
                 });
@@ -910,6 +916,7 @@ impl IconBrowser {
         icon_id: u32,
         nav: &mut ListNav,
         save_request: &mut Option<u32>,
+        copy_request: &mut Option<u32>,
     ) -> Option<String> {
         let hires = ALWAYS_HIRES.get(ui.ctx());
         let language = LANGUAGE.get(ui.ctx());
@@ -959,10 +966,17 @@ impl IconBrowser {
         }
 
         ui.add_space(8.0);
-        // 点击即触发保存：优先用已缓存 PNG，未命中时同步读取（保存优先，不等加载队列）
-        if ui.button("保存此图片").clicked() {
-            *save_request = Some(icon_id);
-        }
+        // 点击即触发：复制到剪贴板 / 保存到文件（水平排布，中间留间距）
+        ui.horizontal(|ui| {
+            if ui.button("复制此图片").clicked() {
+                *copy_request = Some(icon_id);
+            }
+            ui.add_space(8.0);
+            // 点击即触发保存：优先用已缓存 PNG，未命中时同步读取（保存优先，不等加载队列）
+            if ui.button("保存此图片").clicked() {
+                *save_request = Some(icon_id);
+            }
+        });
         ui.add_space(4.0);
         ui.label(
             RichText::new(match size {

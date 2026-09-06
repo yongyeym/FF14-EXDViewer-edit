@@ -733,7 +733,7 @@ impl MusicPlayer {
                 // Export buttons
                 let mut export = None;
                 ui.horizontal(|ui| {
-                    if ui.button("导出当前").clicked() {
+                    if ui.button("导出当前音乐文件").clicked() {
                         export = Some(MusicEvent::ExportCurrent);
                     }
                 });

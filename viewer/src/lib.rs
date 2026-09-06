@@ -24,6 +24,7 @@
 mod about;
 mod app;
 pub mod assets;
+pub mod clipboard;
 pub mod icons;
 pub mod audio;
 mod backend;
