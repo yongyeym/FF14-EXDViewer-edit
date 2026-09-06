@@ -606,7 +606,7 @@ impl IconBrowser {
                         if capped < self.shown.len() && ui.button("全部加载").clicked() {
                             self.pages = self.shown.len().div_ceil(PAGE);
                         }
-                        // 仅显示新增项（与其他页面一致的 🔍 单符号按钮）
+                        // 仅显示新增项（单符号按钮，始终显示，与其他页面 map/music 一致；无新增时禁用）
                         let new_count = self.img_new_items.len();
                         let is_ready = self.img_list_state.starts_with("ready");
                         if is_ready && new_count > 0 {
@@ -615,6 +615,14 @@ impl IconBrowser {
                                     "仅显示新增项（{}）",
                                     thousands(new_count)
                                 ));
+                        } else {
+                            ui.add_enabled(false, Button::new("🔍")).on_hover_text(
+                                if is_ready {
+                                    "当前版本无新增图片"
+                                } else {
+                                    "图片列表加载中…"
+                                },
+                            );
                         }
                         ui.add_sized(
                             Vec2::new(90.0, ui.spacing().interact_size.y),
