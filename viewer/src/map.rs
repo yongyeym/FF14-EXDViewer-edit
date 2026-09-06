@@ -420,9 +420,14 @@ impl MapViewer {
                                         );
                                     }
                                 }
-                                // 下方：短编号 + 复制/保存按钮（居中，两个按钮间留间距）
+                                // 下方：短编号 + 复制/保存按钮（水平居中，两个按钮间留间距）
                                 ui.label(RichText::new(&sub.display).strong());
                                 ui.horizontal(|ui| {
+                                    // 估算两个按钮宽度，用左右留白使整组水平居中
+                                    let pad = ui.spacing().button_padding.x * 2.0 + 4.0;
+                                    let bw = |s: &str| s.chars().count() as f32 * 14.0 + pad;
+                                    let total = bw("复制此地图图片") + 8.0 + bw("保存此地图图片文件");
+                                    ui.add_space(((ui.available_width() - total).max(0.0)) * 0.5);
                                     if ui.button("复制此地图图片").clicked() {
                                         event = Some(MapEvent::CopyOne(sub.code.clone()));
                                     }

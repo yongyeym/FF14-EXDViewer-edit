@@ -966,8 +966,12 @@ impl IconBrowser {
         }
 
         ui.add_space(8.0);
-        // 点击即触发：复制到剪贴板 / 保存到文件（水平排布，中间留间距）
+        // 点击即触发：复制到剪贴板 / 保存到文件（水平排布，中间留间距，整组居中）
         ui.horizontal(|ui| {
+            let pad = ui.spacing().button_padding.x * 2.0 + 4.0;
+            let bw = |s: &str| s.chars().count() as f32 * 14.0 + pad;
+            let total = bw("复制此图片") + 8.0 + bw("保存此图片");
+            ui.add_space(((ui.available_width() - total).max(0.0)) * 0.5);
             if ui.button("复制此图片").clicked() {
                 *copy_request = Some(icon_id);
             }
