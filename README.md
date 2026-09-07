@@ -12,6 +12,16 @@ FF14 EXDViewer edit 是使用 **Rust + egui** 构建的Windows桌面应用程序
 
 > **请注意**：由于增加的功能大多涉及本地文件读写，程序使用需要指定本地FF14游戏文件目录，并建议使用本地EXDSchema结构定义表，测试Debug环境全程使用本地相关文件，不保证使用网络资源时程序正常运行。
 
+## 开始使用
+
+在Release页面下载最新版本即可。
+首次打开时需先指定本地游戏目录下的`/game/sqpack/`目录和EXDSchema结构定义表本地目录或Github仓库地址。
+
+Release发布文件选择：
+* `ff14-exdviewer-edit-v{版本号}.exe`：不包含其他任何独立额外工具的单个可执行文件，运行产生的文件会放到exe同目录下，建议放到单独文件夹内再使用。
+* `column_layout.json`：由我维护的数据表结构定义中文化配置，需放到exe目录的`config/`文件夹内，下载单exe版本时推荐一起下载此文件。此文件用于启用数据表页面的个性化配置表格展示功能，详见下方次要功能说明#3。
+* `ff14-exdviewer-edit-v{版本号}.zip`：完整包，包含`column_layout.json`和多个独立额外工具exe文件，独立额外工具不影响程序主体功能，仅导出当前数据表内容Diff总结表功能需使用。
+
 ## 主要功能说明
 
 ### 1. 数据表列表
@@ -170,7 +180,7 @@ FF14 EXDViewer edit 是使用 **Rust + egui** 构建的Windows桌面应用程序
 
 * `bak/*`：保存旧的文件存档，可删除。
 * `app.ron`：程序核心配置文件，保存当前数据表浏览的位置、程序框体尺寸等信息。
-* `settings.json`：程序核心配置文件，保存游戏文件/EXDSchema本地或网络位置，下载功能URL地址。
+* `settings.json`：程序配置文件，保存游戏文件/EXDSchema本地或网络位置，下载功能URL地址。
 * `favorites.json`：记录收藏的数据表列表。
 * `column_layout.json`：数据表页面「个性化配置」表格展示功能的配置文件，记录了全部数据表与EXDSchema对应列名中文翻译、显示的列、列排序的配置。
 * `map_links_{游戏版本号}.json`：地图列表页面基础信息数据存档，游戏版本更新后会自动生成新版本文件，并删除旧版本。
@@ -195,7 +205,6 @@ FF14_EXDViewer_edit/
 ├── .gitignore
 ├── .cargo/                  # Cargo 配置
 ├── .vscode/                 # VS Code 编辑器配置
-├── #版本留档/               # 早期稳定版本release版本文件留档
 ├── config/                  # 运行时配置（数据表列表存档、列布局等）
 ├── deps/                    # 本地依赖（ironworks、d3dasm、ffxiv-downloader 等）
 ├── glyphnames/              # 字形名列表 crate（资源查看用）
