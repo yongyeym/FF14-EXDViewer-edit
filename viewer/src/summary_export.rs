@@ -158,6 +158,59 @@ pub async fn generate_page(
     let temp_base = std::env::temp_dir().join("exdviewer_summary");
     let _ = std::fs::create_dir_all(&temp_base);
 
+    // 预热引用表：导出用的 TableContext 是新建的，其引用表（Link / ConditionalLink）的
+    // promise 尚未完成。若直接读取，链接列会返回 CellValue::InProgressLink(row_id)，
+    // 最终导出成原始 row_id（而非表格中展示的解析值）。此处与 CSV 导出（csv::warm_links）
+    // 保持一致：多轮触发解析，并等待所有引用表加载完成后再正式取值。
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use crate::utils::yield_to_ui;
+        const MAX_LINK_PASSES: usize = 16;
+        for _ in 0..MAX_LINK_PASSES {
+            let mut pending = false;
+            for (k, (row_id, subrow_id)) in row_keys.iter().enumerate() {
+                if !(start..end).contains(&k) {
+                    continue;
+                }
+                let Ok(row) = context_sheet.get_subrow(*row_id, subrow_id.unwrap_or(0)) else {
+                    continue;
+                };
+                for (_, _, col_idx) in &cols {
+                    let Ok(cell) = context.cell_by_offset(row, *col_idx as u32) else {
+                        continue;
+                    };
+                    if let Ok(value) = cell.read(resolve_display_field) {
+                        if is_pending_value(&value) {
+                            pending = true;
+                        }
+                    }
+                }
+            }
+            if !pending {
+                break;
+            }
+            while context.has_pending_references() {
+                yield_to_ui().await;
+            }
+        }
+    }
+
+    // 字体：使用程序内嵌的同款 CJK 字体（Noto Sans），写出到临时目录供生成工具渲染，
+    // 从而让导出的图片文本与程序界面字体一致。
+    #[cfg(not(target_arch = "wasm32"))]
+    let font_path: Option<PathBuf> = {
+        let (file_name, bytes) = crate::app::export_font(lang);
+        let fonts_dir = temp_base.join("fonts");
+        let _ = std::fs::create_dir_all(&fonts_dir);
+        let p = fonts_dir.join(file_name);
+        if !p.exists() {
+            let _ = std::fs::write(&p, bytes);
+        }
+        p.exists().then_some(p)
+    };
+    #[cfg(target_arch = "wasm32")]
+    let font_path: Option<PathBuf> = None;
+
     let mut rows = Vec::new();
     for (k, (row_id, subrow_id)) in row_keys.iter().enumerate() {
         if !(start..end).contains(&k) {
@@ -198,9 +251,9 @@ pub async fn generate_page(
                     }
                     continue;
                 }
-                cells.push(SummaryCell::Text { value: value.coerce_string().to_string() });
+                cells.push(SummaryCell::Text { value: display_string(&value) });
             } else {
-                cells.push(SummaryCell::Text { value: value.coerce_string().to_string() });
+                cells.push(SummaryCell::Text { value: display_string(&value) });
             }
         }
         rows.push(SummaryRow {
@@ -244,18 +297,60 @@ pub async fn generate_page(
     let out_path = out_base.join(&out_name);
 
     if mode == SummaryMode::Excel {
-        run_tool("gen_excel_tool.exe", &json_path, &out_path, "Excel")?;
+        run_tool("gen_excel_tool.exe", &json_path, &out_path, "Excel", None)?;
     } else {
-        run_tool("gen_image_tool.exe", &json_path, &out_path, "图片")?;
+        run_tool(
+            "gen_image_tool.exe",
+            &json_path,
+            &out_path,
+            "图片",
+            font_path.as_deref(),
+        )?;
     }
 
     let _ = std::fs::remove_file(&json_path);
     Ok((out_path, total_pages))
 }
 
+/// 单元格值是否仍在等待引用表解析（用于预热引用表）。
+#[cfg(not(target_arch = "wasm32"))]
+fn is_pending_value(value: &CellValue) -> bool {
+    match value {
+        CellValue::InProgressLink(_) => true,
+        CellValue::ValidLink {
+            value: Some(value), ..
+        } => is_pending_value(value),
+        _ => false,
+    }
+}
+
+/// 生成与表格单元格展示一致的文本（详见 sheet::cell 的 CellValue::show）：
+/// 链接列解析出显示字段时展示其文本，否则展示 `表名#行号`，与界面所见保持一致。
+fn display_string(value: &CellValue) -> String {
+    match value {
+        CellValue::ValidLink {
+            sheet_name,
+            row_id,
+            value,
+        } => match value {
+            Some(value) => display_string(value),
+            None => format!("{sheet_name}#{row_id}"),
+        },
+        CellValue::InProgressLink(id) => format!("...#{id}"),
+        CellValue::InvalidLink(id) => format!("???#{id}"),
+        other => other.coerce_string().to_string(),
+    }
+}
+
 /// 调用打包的独立工具 exe（程序目录/tools/ 下，PyInstaller 打包，不依赖本地 python）。
 #[cfg(not(target_arch = "wasm32"))]
-fn run_tool(tool_name: &str, json_path: &Path, out_path: &Path, kind: &str) -> anyhow::Result<()> {
+fn run_tool(
+    tool_name: &str,
+    json_path: &Path,
+    out_path: &Path,
+    kind: &str,
+    font_path: Option<&Path>,
+) -> anyhow::Result<()> {
     let exe_dir = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|p| p.to_path_buf()))
@@ -267,10 +362,12 @@ fn run_tool(tool_name: &str, json_path: &Path, out_path: &Path, kind: &str) -> a
             tool.display()
         );
     }
-    let status = std::process::Command::new(&tool)
-        .arg(json_path)
-        .arg(out_path)
-        .status()?;
+    let mut cmd = std::process::Command::new(&tool);
+    cmd.arg(json_path).arg(out_path);
+    if let Some(font_path) = font_path {
+        cmd.arg(font_path);
+    }
+    let status = cmd.status()?;
     if !status.success() {
         anyhow::bail!("生成{kind}失败（exit {:?}），请查看工具报错", status.code());
     }
@@ -278,7 +375,13 @@ fn run_tool(tool_name: &str, json_path: &Path, out_path: &Path, kind: &str) -> a
 }
 
 #[cfg(target_arch = "wasm32")]
-fn run_tool(_tool_name: &str, _json_path: &Path, _out_path: &Path, _kind: &str) -> anyhow::Result<()> {
+fn run_tool(
+    _tool_name: &str,
+    _json_path: &Path,
+    _out_path: &Path,
+    _kind: &str,
+    _font_path: Option<&Path>,
+) -> anyhow::Result<()> {
     anyhow::bail!("web 端不支持生成 Excel/图片总结表");
 }
 

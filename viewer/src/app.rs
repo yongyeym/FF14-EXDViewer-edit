@@ -165,6 +165,14 @@ impl CjkFont {
     }
 }
 
+/// 供导出工具（总结表图片生成）使用：返回当前语言对应的 CJK 字体文件名与内嵌字节，
+/// 使导出图片的文本使用与程序界面完全相同的字体。
+#[cfg(not(target_arch = "wasm32"))]
+pub fn export_font(language: Language) -> (&'static str, &'static [u8]) {
+    let font = CjkFont::for_language(language).unwrap_or(CjkFont::Japanese);
+    (font.asset_file(), font.embedded_bytes())
+}
+
 
 #[derive(Clone)]
 pub struct ExportProgress {
