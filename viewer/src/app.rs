@@ -281,7 +281,12 @@ pub struct App {
     sheet_diff_old: String,
     sheet_diff_new: String,
     sheet_diff_status: String,
-    sheet_diff_result: std::sync::Arc<std::sync::Mutex<Option<String>>>,
+    /// 后台对比结果：(状态文本, 有差异/新增的表名列表)
+    sheet_diff_result: std::sync::Arc<std::sync::Mutex<Option<(String, Vec<String>)>>>,
+    /// 窗口复选框：对比完成后是否同时在数据列表筛选显示有差异的数据表（默认勾选）
+    sheet_diff_filter_list: bool,
+    /// 数据列表当前应用的差异表筛选集合（None = 显示全部数据表）
+    sheet_diff_apply_filter: Option<std::collections::HashSet<String>>,
 
     // ── 导出数据表内容Diff总结表 ──
     summary_export_open: bool,
@@ -290,6 +295,9 @@ pub struct App {
     summary_export_layout: SummaryExportLayout,
     summary_export_has_personalized: bool,
 }
+
+/// 弹窗内相邻按钮之间的间距（用于 是/否、开始/取消 等成对按钮，避免误点相邻按钮）。
+pub(crate) const DIALOG_BUTTON_GAP: f32 = 28.0;
 
 /// 需要二次确认的批量导出类型
 #[derive(Clone, Copy)]
@@ -585,6 +593,7 @@ impl App {
                         if ui.button("开始生成").clicked() {
                             start = true;
                         }
+                        ui.add_space(DIALOG_BUTTON_GAP);
                         if ui.button("取消").clicked() {
                             close = true;
                         }
@@ -738,6 +747,7 @@ impl App {
                         confirmed = true;
                         close = true;
                     }
+                    ui.add_space(DIALOG_BUTTON_GAP);
                     if ui.button("否").clicked() {
                         close = true;
                     }
@@ -761,14 +771,22 @@ impl App {
         // 轮询后台对比结果
         if self.sheet_diff_status == "comparing" {
             if let Ok(mut lock) = self.sheet_diff_result.lock() {
-                if let Some(outcome) = lock.take() {
+                if let Some((outcome, changed_sheets)) = lock.take() {
                     self.sheet_diff_status = outcome;
+                    // 勾选"同时在数据表页面筛选显示有差异的数据表"时，
+                    // 把左侧数据表列表替换为对比结果中有差异/新增的表，方便直观查看数据变动。
+                    if self.sheet_diff_filter_list {
+                        self.sheet_diff_apply_filter = Some(changed_sheets.into_iter().collect());
+                    }
                 }
             }
         }
         let versions = crate::diff::find_version_folders();
         let mut close = false;
         let mut start = false;
+        let mut restore_filter = false;
+        let mut filter_list = self.sheet_diff_filter_list;
+        let has_filter = self.sheet_diff_apply_filter.is_some();
         let mut old_ver = self.sheet_diff_old.clone();
         let mut new_ver = self.sheet_diff_new.clone();
         let status = self.sheet_diff_status.clone();
@@ -777,9 +795,9 @@ impl App {
             .id("sheet_diff_window".into())
             .collapsible(false)
             .resizable(false)
-            .default_size([470.0, 220.0])
+            .default_size([600.0, 250.0])
             .show(ctx, |ui| {
-                ui.set_width(450.0);
+                ui.set_width(580.0);
                 ui.label(
                     "将对比选择的两个版本号对应本地CSV文件，确定是否有文件内容变更，将有变更的表格名称列出并保存到程序目录/export/result/diff_sheets.txt",
                 );
@@ -805,6 +823,25 @@ impl App {
                         });
                 });
                 ui.separator();
+                ui.horizontal_wrapped(|ui| {
+                    let resp = ui.checkbox(
+                        &mut filter_list,
+                        "同时在数据表页面筛选显示有差异的数据表",
+                    );
+                    if resp.changed() && !filter_list {
+                        // 取消勾选时一并还原数据表列表
+                        restore_filter = true;
+                    }
+                    ui.add_space(DIALOG_BUTTON_GAP);
+                    if ui
+                        .add_enabled(has_filter, egui::Button::new("点击还原为显示全部数据表列表"))
+                        .on_hover_text("将左侧数据表列表还原为显示全部数据表")
+                        .clicked()
+                    {
+                        restore_filter = true;
+                    }
+                });
+                ui.add_space(6.0);
                 match status.as_str() {
                     "comparing" => {
                         ui.horizontal(|ui| {
@@ -824,12 +861,17 @@ impl App {
                     if ui.button("关闭").clicked() {
                         close = true;
                     }
+                    ui.add_space(DIALOG_BUTTON_GAP);
                     if status != "comparing" && ui.button("开始查询文件差异").clicked() {
                         start = true;
                     }
                 });
             });
 
+        self.sheet_diff_filter_list = filter_list;
+        if restore_filter {
+            self.sheet_diff_apply_filter = None;
+        }
         if close {
             self.sheet_diff_active = false;
             self.sheet_diff_status = "idle".into();
@@ -856,17 +898,37 @@ impl App {
                         .unwrap_or_else(|| std::path::PathBuf::from("export/result"));
                     let _ = std::fs::create_dir_all(&export_dir);
                     let out_path = export_dir.join(format!("diff_sheets_{old}_{new}.txt"));
-                    let outcome = match compare_sheet_version_csvs(&old, &new, &export_base, &out_path) {
-                        Ok((changed, new_only, old_only)) => {
-                            let n = changed.len() + new_only.len() + old_only.len();
-                            // 用系统默认程序打开结果文件，方便直接查看
-                            open_with_default_app(&out_path);
-                            format!("对比完成，共 {n} 个文件有差异，结果已保存: {}", out_path.display())
-                        }
-                        Err(e) => format!("error:{e}"),
-                    };
+                    let (outcome, sheets): (String, Vec<String>) =
+                        match compare_sheet_version_csvs(&old, &new, &export_base, &out_path) {
+                            Ok((changed, new_only, old_only)) => {
+                                let n = changed.len() + new_only.len() + old_only.len();
+                                // 用系统默认程序打开结果文件，方便直接查看
+                                open_with_default_app(&out_path);
+                                // 数据列表筛选用的表名：有内容变更 + 新版本新增（去掉 .csv 后缀）
+                                let mut names: Vec<String> = changed
+                                    .iter()
+                                    .chain(new_only.iter())
+                                    .map(|f| {
+                                        f.strip_suffix(".csv")
+                                            .or_else(|| f.strip_suffix(".CSV"))
+                                            .unwrap_or(f)
+                                            .to_string()
+                                    })
+                                    .collect();
+                                names.sort();
+                                names.dedup();
+                                (
+                                    format!(
+                                        "对比完成，共 {n} 个文件有差异，结果已保存: {}",
+                                        out_path.display()
+                                    ),
+                                    names,
+                                )
+                            }
+                            Err(e) => (format!("error:{e}"), Vec::new()),
+                        };
                     match result.lock() {
-                        Ok(mut lock) => *lock = Some(outcome),
+                        Ok(mut lock) => *lock = Some((outcome, sheets)),
                         Err(e) => log::error!("sheet_diff Mutex损坏: {e}"),
                     }
                 });
@@ -1753,6 +1815,11 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                         sorted_sheets = all_filtered;
                     }
                 }
+                // 「找出版本变更的数据表」筛选：只显示对比结果中有差异/新增的数据表
+                if let Some(set) = &self.sheet_diff_apply_filter {
+                    sorted_sheets.retain(|(name, _)| set.contains(name));
+                }
+
                 sorted_sheets.sort_by(|a, b| {
                     let a_fav = self.favorites.contains(&a.0);
                     let b_fav = self.favorites.contains(&b.0);
@@ -2283,6 +2350,7 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                                             self.delete_csv_versions.iter().cloned().collect();
                                     }
                                 }
+                                ui.add_space(DIALOG_BUTTON_GAP);
                                 // 重置为默认选中（除最新两个版本外）
                                 if ui.button("选中除最新两个版本外的CSV").clicked() {
                                     self.delete_csv_selected = self.delete_csv_versions
@@ -2291,6 +2359,7 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                                         .cloned()
                                         .collect();
                                 }
+                                ui.add_space(DIALOG_BUTTON_GAP);
                                 if ui.button("关闭").clicked() {
                                     close_window = true;
                                 }
@@ -2316,6 +2385,7 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                                 if ui.button("确定").clicked() {
                                     trigger_delete = true;
                                 }
+                                ui.add_space(DIALOG_BUTTON_GAP);
                                 if ui.button("取消").clicked() {
                                     self.delete_csv_confirming = false;
                                 }
@@ -2356,6 +2426,7 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                                 self.table_layout_switch_start = Some(std::time::Instant::now());
                                 ctx.request_repaint();
                             }
+                            ui.add_space(DIALOG_BUTTON_GAP);
                             if ui.button("取消").clicked() {
                                 self.table_layout_confirm = false;
                             }
@@ -4215,6 +4286,8 @@ impl App {
             sheet_diff_new: String::new(),
             sheet_diff_status: "idle".into(),
             sheet_diff_result: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            sheet_diff_filter_list: true,
+            sheet_diff_apply_filter: None,
             summary_export_open: false,
             summary_export_sheet: String::new(),
             summary_export_mode: SummaryExportMode::Image,

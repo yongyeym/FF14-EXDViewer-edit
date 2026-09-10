@@ -208,6 +208,7 @@ impl IconBrowser {
                             confirmed = true;
                             close = true;
                         }
+                        ui.add_space(crate::app::DIALOG_BUTTON_GAP);
                         if ui.button("否").clicked() {
                             close = true;
                         }

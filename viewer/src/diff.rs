@@ -349,6 +349,7 @@ pub fn draw_diff_window(
         }
         ui.horizontal(|ui| {
             if ui.button("取消对比").clicked() { close = true; }
+            ui.add_space(crate::app::DIALOG_BUTTON_GAP);
             if status != "comparing" && ui.button("开始对比").clicked() {
                 if old_ver == new_ver { diff_state.status = "error:相同版本无法对比！".into(); }
                 else { action = Some(DiffAction::Compare { old: old_ver.clone(), new: new_ver.clone(), sheet: sheet_name.to_string(), filter_key_column: diff_state.filter_key_column, show_new_only: diff_state.show_new_only }); }

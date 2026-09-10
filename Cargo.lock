@@ -2350,7 +2350,7 @@ checksum = "b97b65636e5b9ef369943878ac74335ba1c55c1cb6adbf1e2c293c624248d693"
 
 [[package]]
 name = "ff14-exdviewer-edit"
-version = "1.9.1"
+version = "1.9.2"
 dependencies = [
  "anyhow",
  "arboard",
@@ -2996,7 +2996,7 @@ dependencies = [
 
 [[package]]
 name = "glyphnames"
-version = "1.9.1"
+version = "1.9.2"
 dependencies = [
  "unicode_names2",
 ]
@@ -4069,7 +4069,7 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
 name = "luadec"
-version = "1.9.1"
+version = "1.9.2"
 
 [[package]]
 name = "lz4"
@@ -4938,7 +4938,7 @@ checksum = "df94ce210e5bc13cb6651479fa48d14f601d9858cfe0467f43ae157023b938d3"
 
 [[package]]
 name = "pathlist"
-version = "1.9.1"
+version = "1.9.2"
 dependencies = [
  "anyhow",
  "ironworks",
@@ -6295,7 +6295,7 @@ dependencies = [
 
 [[package]]
 name = "shadermerge"
-version = "1.9.1"
+version = "1.9.2"
 dependencies = [
  "dxbc",
  "hlsl",
@@ -6305,7 +6305,7 @@ dependencies = [
 
 [[package]]
 name = "shaders"
-version = "1.9.1"
+version = "1.9.2"
 dependencies = [
  "crc",
 ]
@@ -7647,7 +7647,7 @@ dependencies = [
 
 [[package]]
 name = "web"
-version = "1.9.1"
+version = "1.9.2"
 dependencies = [
  "actix-cors",
  "actix-files",
