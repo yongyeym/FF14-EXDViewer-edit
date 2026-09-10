@@ -24,6 +24,9 @@ Release发布文件选择：
 
 > **EXDSchema结构定义**：Release发布包中不包含EXDSchema相关文件，如使用本地版，请参考下方的“下载功能”相关说明。
 
+## 更新日志
+各版本更新记录详见 [CHANGELOG.md](CHANGELOG.md)。
+
 ## 主要功能说明
 
 ### 1. 数据表列表
