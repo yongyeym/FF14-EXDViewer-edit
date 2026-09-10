@@ -348,6 +348,11 @@ pub fn draw_diff_window(
             _ => {}
         }
         ui.horizontal(|ui| {
+            ui.add_space(crate::app::centered_buttons_offset(
+                ui,
+                &["取消对比", "开始对比"],
+                crate::app::DIALOG_BUTTON_GAP,
+            ));
             if ui.button("取消对比").clicked() { close = true; }
             ui.add_space(crate::app::DIALOG_BUTTON_GAP);
             if status != "comparing" && ui.button("开始对比").clicked() {

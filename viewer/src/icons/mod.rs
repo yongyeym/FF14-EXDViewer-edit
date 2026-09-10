@@ -204,6 +204,7 @@ impl IconBrowser {
                     ui.label("此过程会耗时较久，请耐心等待，是否确定开始加载反向引用？");
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
+                        ui.add_space(crate::app::centered_buttons_offset(ui, &["是", "否"], crate::app::DIALOG_BUTTON_GAP));
                         if ui.button("是").clicked() {
                             confirmed = true;
                             close = true;

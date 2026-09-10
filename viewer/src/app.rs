@@ -299,6 +299,18 @@ pub struct App {
 /// 弹窗内相邻按钮之间的间距（用于 是/否、开始/取消 等成对按钮，避免误点相邻按钮）。
 pub(crate) const DIALOG_BUTTON_GAP: f32 = 28.0;
 
+/// 计算一组按钮在弹窗内整体水平居中所需的左侧留白。
+/// egui 没有"整行居中"的 API（`horizontal_centered` 只做垂直居中对齐），
+/// 因此按按钮字符数估算总宽后留白；文本宽度无法用字体精确测量
+/// （`ui.fonts` 给出的是 `&Fonts`，`layout_no_wrap` 需要 `&mut`），故用估算值。
+pub(crate) fn centered_buttons_offset(ui: &egui::Ui, labels: &[&str], gap: f32) -> f32 {
+    let pad = ui.spacing().button_padding.x * 2.0 + 4.0;
+    let bw = |s: &str| s.chars().count() as f32 * 14.0 + pad;
+    let total: f32 = labels.iter().map(|s| bw(s)).sum::<f32>()
+        + gap * labels.len().saturating_sub(1) as f32;
+    ((ui.available_width() - total) * 0.5).max(0.0)
+}
+
 /// 需要二次确认的批量导出类型
 #[derive(Clone, Copy)]
 enum ExportConfirmKind {
@@ -590,6 +602,7 @@ impl App {
                     });
                     ui.add_space(10.0);
                     ui.horizontal(|ui| {
+                        ui.add_space(centered_buttons_offset(ui, &["开始生成", "取消"], DIALOG_BUTTON_GAP));
                         if ui.button("开始生成").clicked() {
                             start = true;
                         }
@@ -743,6 +756,7 @@ impl App {
                 ui.label(text);
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
+                    ui.add_space(centered_buttons_offset(ui, &["是", "否"], DIALOG_BUTTON_GAP));
                     if ui.button("是").clicked() {
                         confirmed = true;
                         close = true;
@@ -858,6 +872,11 @@ impl App {
                     _ => {}
                 }
                 ui.horizontal(|ui| {
+                    ui.add_space(centered_buttons_offset(
+                        ui,
+                        &["关闭", "开始查询文件差异"],
+                        DIALOG_BUTTON_GAP,
+                    ));
                     if ui.button("关闭").clicked() {
                         close = true;
                     }
@@ -2338,7 +2357,12 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                                     }
                                 });
                             ui.separator();
-                            ui.horizontal_wrapped(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.add_space(centered_buttons_offset(
+                                    ui,
+                                    &["全选", "选中除最新两个版本外的CSV", "关闭"],
+                                    DIALOG_BUTTON_GAP,
+                                ));
                                 // 全选/取消全选
                                 if ui.button("全选").clicked() {
                                     if self.delete_csv_selected.len() == self.delete_csv_versions.len()
@@ -2382,6 +2406,7 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                             ui.label(format!("将删除 {} 个版本文件夹中的全部CSV文件", self.delete_csv_selected.len()));
                             ui.add_space(8.0);
                             ui.horizontal(|ui| {
+                                ui.add_space(centered_buttons_offset(ui, &["确定", "取消"], DIALOG_BUTTON_GAP));
                                 if ui.button("确定").clicked() {
                                     trigger_delete = true;
                                 }
@@ -2417,6 +2442,7 @@ fn draw_logger(&mut self, ctx: &egui::Context) {
                         ui.label("重新加载表格数据需要时间，是否确认切换？");
                         ui.add_space(8.0);
                         ui.horizontal(|ui| {
+                            ui.add_space(centered_buttons_offset(ui, &["确定", "取消"], DIALOG_BUTTON_GAP));
                             if ui.button("确定").clicked() {
                                 self.table_layout_full = !self.table_layout_full;
                                 // 标记待重载（借用释放后在 draw_sheet_data 之前执行）
